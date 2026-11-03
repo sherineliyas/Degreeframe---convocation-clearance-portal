@@ -1,0 +1,6 @@
+{
+  "name": "DegreeFrame - Convocation Clearance Portal",
+  "description": "Convocation document verification and photo clearance portal with student submission, faculty and HOD multi-tier approval workflow, and Google Sheets data structure.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

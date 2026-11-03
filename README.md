@@ -131,14 +131,27 @@ If you are deploying from another laptop or account without using the command li
 
 ---
 
-### Step 2: Deploy on Render
+### Step 2: Deploy on GitHub Pages (Frontend Static Mode)
+> **Why did `GET /src/main.tsx 404 Not Found` happen on GitHub Pages?**  
+> Browsers cannot run raw `.tsx` (TypeScript + React) files directly from source code. When GitHub Pages is set to **"Deploy from a branch"**, it serves the uncompiled `index.html` which points to `src/main.tsx`. Instead, GitHub Pages must serve the compiled `dist/` folder built by Vite (`npm run build`).
+
+To fix this on GitHub Pages:
+1. Ensure `.github/workflows/deploy.yml` is in your repository (included in this project).
+2. Go to your GitHub Repository $\rightarrow$ **Settings** $\rightarrow$ **Pages** (on the left sidebar).
+3. Under **Build and deployment** $\rightarrow$ **Source**, change **"Deploy from a branch"** to **"GitHub Actions"**.
+4. Push a commit or go to the **Actions** tab and click **Re-run jobs**. GitHub will automatically run `npm run build` and publish the compiled `dist/` bundle to `https://sherineliyas.github.io/Degreeframe---convocation-clearance-portal/`.
+
+---
+
+### Step 3: Deploy on Render (Full-Stack with Express Backend & Official Email OTP)
 1. Go to [Render Dashboard](https://dashboard.render.com/) and click **New +** $\rightarrow$ **Web Service**.
-2. Connect your GitHub repository `degreeframe-convocation`.
+2. Connect your GitHub repository `Degreeframe---convocation-clearance-portal`.
 3. Set the following build options:
    * **Runtime**: `Node`
-   * **Build Command**: `npm run build`
+   * **Build Command**: `npm install && npm run build`
    * **Start Command**: `npm start`
 4. Under **Environment Variables**, add:
+   * `NODE_ENV`: `production`
    * `SMTP_HOST`: `smtp.gmail.com`
    * `SMTP_PORT`: `587`
    * `SMTP_USER`: `coe@hindustanuniv.ac.in` (your central deployment email)

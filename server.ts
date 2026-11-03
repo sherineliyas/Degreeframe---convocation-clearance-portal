@@ -923,8 +923,8 @@ app.get('/api/student/status/:query', (req: Request, res: Response) => {
 // ==========================================
 
 // Get pending applications scoped to Teacher or HOD
-app.post('/api/faculty/pending', (req: Request, res: Response) => {
-  const email = String(req.body.email || '').toLowerCase().trim();
+app.all('/api/faculty/pending', (req: Request, res: Response) => {
+  const email = String(req.body?.email || req.query?.email || '').toLowerCase().trim();
 
   const faculty = facultyData.find((f) => f.email.toLowerCase() === email);
   if (!faculty) {

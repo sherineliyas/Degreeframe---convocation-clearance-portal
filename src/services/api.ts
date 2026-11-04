@@ -30,6 +30,9 @@ function getBackendBaseUrl(): string {
   if (envBase) {
     return envBase;
   }
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')) {
+    return 'https://degreeframe-hits-portal.onrender.com';
+  }
   const cfg = storage.getConfig();
   if (cfg.scriptUrl && !cfg.scriptUrl.includes('script.google.com')) {
     return cfg.scriptUrl.trim().replace(/\/+$/, '');
@@ -163,14 +166,6 @@ export const api = {
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
           const data = await response.json();
-          // Also trigger Google Apps Script email dispatch if configured
-          if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
-            fetch(config.scriptUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'sendOtp', email: cleanEmail, otp, portalType }),
-            }).catch(() => {});
-          }
           return data;
         }
       } catch {

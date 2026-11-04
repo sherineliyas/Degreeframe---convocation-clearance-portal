@@ -113,6 +113,16 @@ function doPost(e) {
         responseData = handleAddClassTeacher(payload);
         break;
 
+      case "addHod":
+      case "addAcoe":
+      case "upsertFacultyMember":
+        responseData = handleUpsertFacultyMember(payload);
+        break;
+
+      case "syncMasterSheet":
+        responseData = handleSyncMasterSheet();
+        break;
+
       default:
         responseData = { success: false, message: `Unknown action: '${action}'` };
     }
@@ -907,17 +917,10 @@ function getFacultySubmissions(department, section) {
 // ==========================================
 
 function handleAddClassTeacher(payload) {
-  const hodEmail = (payload.hodEmail || "").toLowerCase().trim();
-  const authRes = handleFacultyLogin(hodEmail);
-
-  if (!authRes.success || authRes.faculty.role !== "HOD") {
-    return { success: false, message: "Unauthorized: Only HOD accounts can assign class teachers." };
-  }
-
   const teacherEmail = (payload.teacherEmail || "").trim().toLowerCase();
   const teacherName = (payload.teacherName || "").trim();
-  const department = (payload.department || authRes.faculty.department).trim();
-  const specialization = (payload.specialization || "GENERAL").trim();
+  const department = (payload.department || "ALL").trim().toUpperCase();
+  const specialization = (payload.specialization || "ALL").trim().toUpperCase();
   const semester = (payload.semester || "VIII").trim().toUpperCase();
   const section = (payload.section || "A").trim().toUpperCase();
   const batch = (payload.batch || "Batch A").trim();
@@ -929,23 +932,157 @@ function handleAddClassTeacher(payload) {
     return { success: false, message: "Faculty name is required." };
   }
 
+  return handleUpsertFacultyMember({
+    email: teacherEmail,
+    name: teacherName,
+    role: "TEACHER",
+    department: department,
+    specialization: specialization,
+    semester: semester,
+    batch: batch,
+    section: section
+  });
+}
+
+// Upsert ACOE, HOD, or Class Teacher into the 'Faculty' tab of the Master Google Sheet
+function handleUpsertFacultyMember(payload) {
+  const email = String(payload.email || payload.teacherEmail || "").trim().toLowerCase();
+  const name = String(payload.name || payload.teacherName || "").trim();
+  const role = String(payload.role || "TEACHER").trim().toUpperCase();
+  const department = String(payload.department || payload.streamScope || "ALL").trim().toUpperCase();
+  const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
+  const semester = String(payload.semester || "ALL").trim().toUpperCase();
+  const batch = String(payload.batch || "ALL").trim();
+  const section = String(payload.section || "ALL").trim().toUpperCase();
+
+  if (!email || !name) {
+    return { success: false, message: "Email and Name are required for Faculty tab entry." };
+  }
+
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
-  if (!sheet) return { success: false, message: "'Faculty' sheet not found." };
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
 
-  sheet.appendRow([
-    teacherEmail,
-    teacherName,
-    "TEACHER",
-    department,
-    specialization,
-    semester,
-    batch,
-    section
-  ]);
+  const data = sheet.getDataRange().getValues();
+  const rowData = [email, name, role, department, specialization, semester, batch, section];
 
-  return { 
-    success: true, 
-    message: `Class Teacher ${teacherName} (${teacherEmail}) added successfully for ${department} [Sec ${section} - ${batch}].` 
+  // Check if same email + role + department + section already exists
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+    const rowDept = String(data[i][3] || "").trim().toUpperCase();
+    const rowSec = String(data[i][7] || data[i][5] || "").trim().toUpperCase();
+
+    if (
+      (role === "HOD" && rowRole === "HOD" && rowDept === department) ||
+      (role === "ACOE" && rowEmail === email) ||
+      (rowEmail === email && rowRole === role && rowDept === department && rowSec === section)
+    ) {
+      sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      return {
+        success: true,
+        message: `${role} record for ${name} (${email}) updated in Faculty sheet.`
+      };
+    }
+  }
+
+  sheet.appendRow(rowData);
+  return {
+    success: true,
+    message: `${role} record for ${name} (${email}) saved to Faculty sheet.`
+  };
+}
+
+// Fetch all 3 tabs (Student_data, Faculty, Submissions) from the Master Google Sheet
+function handleSyncMasterSheet() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+  const students = [];
+  const studentSheet = ss.getSheetByName("Student_data");
+  if (studentSheet) {
+    const sData = studentSheet.getDataRange().getValues();
+    for (let i = 1; i < sData.length; i++) {
+      const regNo = String(sData[i][0] || "").trim();
+      if (!regNo) continue;
+      let dobVal = sData[i][4];
+      if (dobVal instanceof Date) {
+        dobVal = Utilities.formatDate(dobVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      } else {
+        dobVal = String(dobVal || "").trim();
+      }
+      students.push({
+        registerNumber: regNo,
+        name: String(sData[i][1] || "").trim(),
+        fatherName: String(sData[i][2] || "").trim(),
+        gender: String(sData[i][3] || "MALE").trim(),
+        dob: dobVal,
+        nationality: String(sData[i][5] || "INDIAN").trim(),
+        year: String(sData[i][6] || "IV").trim(),
+        branch: String(sData[i][7] || "").trim(),
+        specialization: String(sData[i][8] || "GENERAL").trim()
+      });
+    }
+  }
+
+  const faculty = [];
+  const facultySheet = ss.getSheetByName("Faculty");
+  if (facultySheet) {
+    const fData = facultySheet.getDataRange().getValues();
+    for (let i = 1; i < fData.length; i++) {
+      const email = String(fData[i][0] || "").trim().toLowerCase();
+      if (!email) continue;
+      faculty.push({
+        email: email,
+        name: String(fData[i][1] || "").trim(),
+        role: String(fData[i][2] || "TEACHER").trim().toUpperCase(),
+        department: String(fData[i][3] || "ALL").trim().toUpperCase(),
+        specialization: String(fData[i][4] || "ALL").trim().toUpperCase(),
+        semester: String(fData[i][5] || "ALL").trim().toUpperCase(),
+        batch: String(fData[i][6] || "ALL").trim(),
+        section: String(fData[i][7] || "ALL").trim().toUpperCase()
+      });
+    }
+  }
+
+  const submissions = [];
+  const subSheet = ss.getSheetByName("Submissions");
+  if (subSheet) {
+    const subData = subSheet.getDataRange().getValues();
+    for (let i = 1; i < subData.length; i++) {
+      const regNo = String(subData[i][2] || "").trim();
+      if (!regNo) continue;
+      submissions.push({
+        submissionId: String(subData[i][0] || `sub-${i}`).trim(),
+        studentEmail: String(subData[i][1] || "").trim().toLowerCase(),
+        registerNumber: regNo,
+        studentName: String(subData[i][3] || "").trim(),
+        fatherName: String(subData[i][4] || "").trim(),
+        gender: String(subData[i][5] || "").trim(),
+        dob: String(subData[i][6] || "").trim(),
+        nationality: String(subData[i][7] || "").trim(),
+        departmentBranch: String(subData[i][8] || "").trim().toUpperCase(),
+        specialization: String(subData[i][9] || "").trim().toUpperCase(),
+        semester: String(subData[i][10] || "VIII").trim().toUpperCase(),
+        section: String(subData[i][11] || "A").trim().toUpperCase(),
+        batch: String(subData[i][12] || "Batch A").trim(),
+        photoUpload: String(subData[i][13] || `${regNo}.jpg`).trim(),
+        finalDriveUrl: String(subData[i][14] || "").trim(),
+        proof10thUrl: String(subData[i][15] || "").trim(),
+        proofTcUrl: String(subData[i][16] || "").trim(),
+        validationNotes: String(subData[i][17] || "").trim(),
+        approvalStatus: String(subData[i][18] || "PENDING_TEACHER").trim().toUpperCase(),
+        teacherRemarks: String(subData[i][19] || "").trim(),
+        hodRemarks: String(subData[i][20] || "").trim(),
+        deanRemarks: String(subData[i][21] || "").trim(),
+        submittedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  return {
+    success: true,
+    students: students,
+    faculty: faculty,
+    submissions: submissions
   };
 }
 

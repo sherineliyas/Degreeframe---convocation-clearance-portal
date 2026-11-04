@@ -936,7 +936,7 @@ export const CoePortal: React.FC = () => {
           }`}
         >
           <FileSpreadsheet className="w-4 h-4" />
-          Upload & Manage Sheets
+          Master Google Sheet
         </button>
 
         <button
@@ -1386,19 +1386,19 @@ export const CoePortal: React.FC = () => {
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* TAB 4: UPLOAD & MANAGE SHEETS */}
+      {/* TAB 4: MASTER GOOGLE SHEET ARCHITECTURE & SYNC */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'sheets' && (
         <div className="space-y-6">
-          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-2xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-2xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                   <FileSpreadsheet className="w-5 h-5 text-purple-700" />
-                  Upload & Sync Google Sheets Database
+                  Master Google Sheet Live Database
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Upload CSV files or paste spreadsheet rows directly to sync records for Student Data, Submissions, and Faculty directories.
+                  All student records, faculty appointments, and clearance submissions are automatically read from and saved directly to your connected 3-tab Master Google Sheet.
                 </p>
               </div>
 
@@ -1426,101 +1426,76 @@ export const CoePortal: React.FC = () => {
               </div>
             </div>
 
-            {/* Target Tab Selection */}
-            <div className="flex items-center gap-2 mb-4">
-              {(['Student_data', 'Submissions', 'Faculty'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setSheetTabSelect(tab)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                    sheetTabSelect === tab
-                      ? 'bg-purple-700 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {tab === 'Student_data'
-                    ? '1. Student_data (9 cols)'
-                    : tab === 'Submissions'
-                    ? '2. Submissions (22 cols)'
-                    : '3. Faculty Directory (8 cols)'}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => handleDownloadTemplate(sheetTabSelect)}
-                className="ml-auto text-xs text-purple-700 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Download {sheetTabSelect} Template
-              </button>
-            </div>
-
-            {/* Upload or Paste CSV Area */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-700">
-                  Paste CSV Data for <span className="text-purple-700">{sheetTabSelect}</span> Tab:
+            {/* Master Google Spreadsheet URL Config */}
+            <form onSubmit={handleSaveConfig} className="space-y-4 max-w-2xl">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Master Google Spreadsheet URL or ID
                 </label>
-                <label className="text-xs text-purple-700 hover:underline font-medium cursor-pointer flex items-center gap-1">
-                  <Upload className="w-3.5 h-3.5" />
-                  Select .CSV File from Device
-                  <input
-                    type="file"
-                    accept=".csv,.txt"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          setCsvContent(String(ev.target?.result || ''));
-                        };
-                        reader.readAsText(file);
-                      }
-                    }}
-                  />
-                </label>
+                <input
+                  type="text"
+                  value={sheetUrlInput}
+                  onChange={(e) => setSheetUrlInput(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                  required
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  No separate student upload is required—students are fetched directly from the <code className="text-purple-700">Student_data</code> tab of this Master Sheet.
+                </p>
               </div>
 
-              <textarea
-                rows={8}
-                value={csvContent}
-                onChange={(e) => setCsvContent(e.target.value)}
-                placeholder={`Paste comma-separated rows with header line here...\nExample:\n${
-                  sheetTabSelect === 'Student_data'
-                    ? 'REGISTER NUMBER,NAME,FATHER NAME,GENDER,DATE OF BIRTH,NATIONALITY,YEAR,BRANCH,SPECIALIZATION\n20134001,John Doe,Robert Doe,Male,2002-05-14,Indian,IV,AERONAUTICAL ENGINEERING,Avionics'
-                    : sheetTabSelect === 'Faculty'
-                    ? 'Email,Name,Role,Department,Specialization,Semester,Batch,Section\nhod.aero@hindustanuniv.ac.in,Dr. K. Ramesh,HOD,AERONAUTICAL ENGINEERING,ALL,ALL,ALL,ALL\nteacher.aero@hindustanuniv.ac.in,Prof. S. Anita,TEACHER,AERONAUTICAL ENGINEERING,Avionics,VIII,Batch A,A'
-                    : 'Submission_ID,Student_Email,Register_Number,Student_Name,Father_Name,Gender,DOB,Nationality,Department_Branch,Specialization,Semester,Section,Batch,Photo_Upload,Final_Drive_URL,Proof_10th_URL,Proof_TC_URL,Validation_Notes,Approval_Status,Teacher_Remarks,HOD_Remarks,Dean_Remarks'
-                }`}
-                className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all leading-relaxed"
-              />
-
-              <div className="flex items-center justify-between pt-2">
-                <span className="text-[11px] text-slate-400">
-                  Headers must match the standard Google Sheets structure defined in specifications.
-                </span>
-
+              <div className="flex flex-wrap items-center gap-3">
                 <button
-                  type="button"
-                  onClick={handleImportCsv}
-                  disabled={isImporting || !csvContent.trim()}
-                  className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                  type="submit"
+                  disabled={isSavingConfig}
+                  className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-60 cursor-pointer"
                 >
-                  {isImporting ? (
+                  {isSavingConfig ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      Importing Records...
+                      Syncing Master Sheet...
                     </>
                   ) : (
                     <>
-                      <Upload className="w-4 h-4" />
-                      Import Records into Database
+                      <CheckCircle2 className="w-4 h-4" />
+                      Save & Sync Master Google Sheet
                     </>
                   )}
                 </button>
+              </div>
+            </form>
+
+            {/* 3-Tab Automated Data Flow Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="text-xs font-bold text-slate-900 mb-1 flex items-center justify-between">
+                  <span>1. Student_data (9 Cols)</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-800">Auto-Read</span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Pre-populated in your Master Google Sheet. When a student enters their Register Number, their profile is fetched directly from this tab.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="text-xs font-bold text-slate-900 mb-1 flex items-center justify-between">
+                  <span>2. Faculty (8 Cols)</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-100 text-purple-800">Auto-Saved</span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Whenever Super Admin adds an ACOE, COE assigns a Department HOD, or an HOD assigns a Class Teacher, it is automatically saved to this tab.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <div className="text-xs font-bold text-slate-900 mb-1 flex items-center justify-between">
+                  <span>3. Submissions (22 Cols)</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-800">Auto-Saved</span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Student photo submissions (<code className="text-emerald-800">&lt;RegNo&gt;.jpg</code> Drive URLs) and Class Teacher / HOD approvals are automatically recorded in this tab.
+                </p>
               </div>
             </div>
           </div>

@@ -184,6 +184,176 @@ async function callGoogleAppsScript(action: string, payload: Record<string, any>
   return null;
 }
 
+// Parse CSV helper for direct Google Sheet gviz CSV export fallback
+function parseCsvRows(csvText: string): string[][] {
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  return lines.map((line) => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  });
+}
+
+let lastSheetSyncTime = 0;
+
+// Syncs Student_data, Faculty, and Submissions directly from the Master Google Sheet
+async function syncFromMasterSheet(force = false): Promise<boolean> {
+  const now = Date.now();
+  if (!force && studentData.length > 0 && now - lastSheetSyncTime < 30 * 1000) {
+    return true;
+  }
+
+  // 1. Try Google Apps Script (Code.gs) syncMasterSheet first
+  const gasSync = await callGoogleAppsScript('syncMasterSheet', {});
+  if (gasSync && gasSync.success) {
+    if (Array.isArray(gasSync.students) && gasSync.students.length > 0) {
+      studentData = gasSync.students;
+      rebuildStudentIndex();
+    }
+    if (Array.isArray(gasSync.faculty) && gasSync.faculty.length > 0) {
+      facultyData = gasSync.faculty;
+      for (const f of facultyData) {
+        if (String(f.role).toUpperCase().includes('ACOE')) {
+          const exists = coeUsersData.some((u) => u.email.toLowerCase() === f.email.toLowerCase());
+          if (!exists) {
+            coeUsersData.push({
+              email: f.email.toLowerCase(),
+              name: f.name,
+              role: 'ACOE',
+              streamScope: (f.department === 'ENGINEERING' || f.department === 'NON_ENGINEERING' ? f.department : 'ALL') as any,
+              password: 'Acoe@123',
+              isDefaultPassword: true,
+              otpEnabled: true,
+            });
+          }
+        }
+      }
+    }
+    if (Array.isArray(gasSync.submissions) && gasSync.submissions.length > 0) {
+      submissionsData = gasSync.submissions;
+    }
+    lastSheetSyncTime = now;
+    return true;
+  }
+
+  // 2. Direct Google Sheet CSV export fallback (works whenever the Master Sheet is shared as Anyone with link can view)
+  const sheetId = (coeSettings.spreadsheetId || '').trim();
+  if (!sheetId) return false;
+
+  try {
+    const fetchTabCsv = async (tabName: string) => {
+      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const text = await res.text();
+      if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) return null;
+      return parseCsvRows(text);
+    };
+
+    const [studentRows, facultyRows, subRows] = await Promise.all([
+      fetchTabCsv('Student_data'),
+      fetchTabCsv('Faculty'),
+      fetchTabCsv('Submissions'),
+    ]);
+
+    if (studentRows && studentRows.length > 1) {
+      studentData = studentRows.slice(1).filter((r) => r[0]).map((r) => ({
+        registerNumber: r[0] || '',
+        name: r[1] || '',
+        fatherName: r[2] || '',
+        gender: r[3] || 'MALE',
+        dob: r[4] || '',
+        nationality: r[5] || 'INDIAN',
+        year: r[6] || 'IV',
+        branch: r[7] || '',
+        specialization: r[8] || 'GENERAL',
+      }));
+      rebuildStudentIndex();
+    }
+
+    if (facultyRows && facultyRows.length > 1) {
+      facultyData = facultyRows.slice(1).filter((r) => r[0]).map((r) => ({
+        email: (r[0] || '').toLowerCase(),
+        name: r[1] || '',
+        role: ((r[2] || 'TEACHER').toUpperCase()) as any,
+        department: (r[3] || 'ALL').toUpperCase(),
+        specialization: (r[4] || 'ALL').toUpperCase(),
+        semester: (r[5] || 'ALL').toUpperCase(),
+        batch: r[6] || 'ALL',
+        section: (r[7] || 'ALL').toUpperCase(),
+      }));
+      for (const f of facultyData) {
+        if (String(f.role).toUpperCase().includes('ACOE')) {
+          const exists = coeUsersData.some((u) => u.email.toLowerCase() === f.email.toLowerCase());
+          if (!exists) {
+            coeUsersData.push({
+              email: f.email.toLowerCase(),
+              name: f.name,
+              role: 'ACOE',
+              streamScope: (f.department === 'ENGINEERING' || f.department === 'NON_ENGINEERING' ? f.department : 'ALL') as any,
+              password: 'Acoe@123',
+              isDefaultPassword: true,
+              otpEnabled: true,
+            });
+          }
+        }
+      }
+    }
+
+    if (subRows && subRows.length > 1) {
+      submissionsData = subRows.slice(1).filter((r) => r[2]).map((r, idx) => ({
+        submissionId: r[0] || `sub-${idx}`,
+        studentEmail: (r[1] || '').toLowerCase(),
+        registerNumber: r[2] || '',
+        studentName: r[3] || '',
+        fatherName: r[4] || '',
+        gender: r[5] || '',
+        dob: r[6] || '',
+        nationality: r[7] || '',
+        departmentBranch: (r[8] || '').toUpperCase(),
+        specialization: (r[9] || '').toUpperCase(),
+        semester: (r[10] || 'VIII').toUpperCase(),
+        section: (r[11] || 'A').toUpperCase(),
+        batch: r[12] || 'Batch A',
+        photoUpload: r[13] || `${r[2]}.jpg`,
+        finalDriveUrl: r[14] || '',
+        proof10thUrl: r[15] || '',
+        proofTcUrl: r[16] || '',
+        validationNotes: r[17] || '',
+        approvalStatus: ((r[18] || 'PENDING_TEACHER').toUpperCase()) as any,
+        teacherRemarks: r[19] || '',
+        hodRemarks: r[20] || '',
+        deanRemarks: r[21] || '',
+        submittedAt: new Date().toISOString(),
+      }));
+    }
+
+    lastSheetSyncTime = now;
+    return true;
+  } catch (err: any) {
+    console.warn('[SHEET-CSV-SYNC] Could not auto-fetch Master Google Sheet:', err?.message || err);
+    return false;
+  }
+}
+
 // Simulated OTP storage
 const otpCache: Record<string, { otp: string; expiresAt: number; role: string }> = {};
 
@@ -320,7 +490,7 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/auth/verify-otp', (req: Request, res: Response) => {
+app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const inputOtp = String(req.body.otp || '').trim();
   const portalType = String(req.body.portalType || 'student').toLowerCase();
@@ -373,7 +543,11 @@ app.post('/api/auth/verify-otp', (req: Request, res: Response) => {
   }
 
   if (portalType === 'faculty') {
-    const matched = facultyData.find((f) => f.email.toLowerCase() === email);
+    let matched = facultyData.find((f) => f.email.toLowerCase() === email);
+    if (!matched) {
+      await syncFromMasterSheet(true);
+      matched = facultyData.find((f) => f.email.toLowerCase() === email);
+    }
     if (!matched) {
       return res.status(403).json({
         success: false,
@@ -479,7 +653,10 @@ app.post('/api/auth/coe-login', (req: Request, res: Response) => {
 // ==========================================
 
 // Get COE Settings & System Overview (Filterable by Stream Scope)
-app.get('/api/coe/overview', (req: Request, res: Response) => {
+app.get('/api/coe/overview', async (req: Request, res: Response) => {
+  const forceSync = req.query.sync === 'true';
+  await syncFromMasterSheet(forceSync);
+
   const streamScope = (req.query.streamScope || 'ALL').toString().toUpperCase() as 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING';
 
   const filteredStudents = studentData.filter((s) => matchesStreamScope(s.branch + ' ' + s.specialization, streamScope));
@@ -528,8 +705,8 @@ app.get('/api/coe/users', (req: Request, res: Response) => {
   });
 });
 
-// Add / Appoint ACOE User (Super Admin Action) - Stream scope defaults to ALL
-app.post('/api/coe/add-acoe', (req: Request, res: Response) => {
+// Add / Appoint ACOE User (Super Admin Action) - Stream scope defaults to ALL and saves to Faculty tab
+app.post('/api/coe/add-acoe', async (req: Request, res: Response) => {
   const { email, name, role, streamScope, password, otpEnabled } = req.body;
 
   const cleanEmail = String(email || '').toLowerCase().trim();
@@ -570,9 +747,21 @@ app.post('/api/coe/add-acoe', (req: Request, res: Response) => {
     coeUsersData.push(newAcoe);
   }
 
+  // Save ACOE into the Faculty tab of the Master Google Sheet
+  await callGoogleAppsScript('addAcoe', {
+    email: cleanEmail,
+    name: cleanName,
+    role: 'ACOE',
+    department: scope,
+    specialization: 'ALL',
+    semester: 'ALL',
+    batch: 'ALL',
+    section: 'ALL',
+  });
+
   return res.json({
     success: true,
-    message: `ACOE User ${cleanName} (${cleanEmail}) appointed successfully with access to ALL streams. Email OTP: ${newAcoe.otpEnabled ? 'Enabled' : 'Disabled'}.`,
+    message: `ACOE User ${cleanName} (${cleanEmail}) appointed and saved to Master Sheet Faculty tab. Email OTP: ${newAcoe.otpEnabled ? 'Enabled' : 'Disabled'}.`,
     user: newAcoe,
   });
 });
@@ -676,7 +865,7 @@ app.post('/api/coe/change-password', (req: Request, res: Response) => {
 });
 
 // Update Google Drive folder & Spreadsheet Settings
-app.post('/api/coe/config', (req: Request, res: Response) => {
+app.post('/api/coe/config', async (req: Request, res: Response) => {
   const { spreadsheetUrl, driveFolderUrl, scriptUrl, academicYear, convocationBatch } = req.body;
 
   if (spreadsheetUrl) {
@@ -700,17 +889,18 @@ app.post('/api/coe/config', (req: Request, res: Response) => {
   if (academicYear) coeSettings.academicYear = academicYear;
   if (convocationBatch) coeSettings.convocationBatch = convocationBatch;
 
+  // Automatically sync Student_data, Faculty, and Submissions from the configured Master Sheet
+  await syncFromMasterSheet(true);
+
   return res.json({
     success: true,
-    message: 'COE Google Drive storage folder, Apps Script URL & Spreadsheet configuration updated.',
+    message: 'Master Google Sheet & Drive folder configuration saved and live records synced.',
     settings: coeSettings,
   });
 });
 
-// Demo reset endpoint removed.
-
-// COE UI: Add / Assign Department HOD
-app.post('/api/coe/add-hod', (req: Request, res: Response) => {
+// COE UI: Add / Assign Department HOD (saves directly to Faculty tab in Master Sheet)
+app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
   const { email, name, department, specialization } = req.body;
 
   const cleanEmail = String(email || '').toLowerCase().trim();
@@ -753,9 +943,21 @@ app.post('/api/coe/add-hod', (req: Request, res: Response) => {
     facultyData.unshift(newHodRecord);
   }
 
+  // Save HOD record to the Faculty tab of the Master Google Sheet
+  await callGoogleAppsScript('addHod', {
+    email: cleanEmail,
+    name: cleanName,
+    role: 'HOD',
+    department: cleanDept,
+    specialization: newHodRecord.specialization,
+    semester: 'ALL',
+    batch: 'ALL',
+    section: 'ALL',
+  });
+
   return res.json({
     success: true,
-    message: `Head of Department (HOD) for ${cleanDept} assigned: ${cleanName} (${cleanEmail}).`,
+    message: `Head of Department (HOD) for ${cleanDept} assigned and saved to Master Sheet Faculty tab: ${cleanName} (${cleanEmail}).`,
     hod: newHodRecord,
   });
 });
@@ -799,9 +1001,13 @@ app.post('/api/coe/import-sheets', (req: Request, res: Response) => {
 // 3. STUDENT APIS
 // ==========================================
 
-// Lookup student data by Register Number
+// Lookup student data by Register Number (fetches directly from Master Sheet Student_data tab)
 app.get('/api/student/lookup/:regNo', async (req: Request, res: Response) => {
   const queryReg = req.params.regNo.trim().toUpperCase();
+
+  if (studentData.length === 0) {
+    await syncFromMasterSheet();
+  }
 
   // 1. Check Submissions tab first
   const existingSub = submissionsData.find(
@@ -821,7 +1027,11 @@ app.get('/api/student/lookup/:regNo', async (req: Request, res: Response) => {
   }
 
   // 2. Fast O(1) Lookup in Student_data Hash Map
-  const student = studentIndexMap.get(queryReg) || studentData.find((s) => s.registerNumber.toUpperCase() === queryReg);
+  let student = studentIndexMap.get(queryReg) || studentData.find((s) => s.registerNumber.toUpperCase() === queryReg);
+  if (!student) {
+    await syncFromMasterSheet(true);
+    student = studentIndexMap.get(queryReg) || studentData.find((s) => s.registerNumber.toUpperCase() === queryReg);
+  }
   if (student) {
     return res.json({
       success: true,
@@ -838,7 +1048,7 @@ app.get('/api/student/lookup/:regNo', async (req: Request, res: Response) => {
 
   return res.status(404).json({
     success: false,
-    message: `Register Number '${req.params.regNo}' not found in official student database sheet.`,
+    message: `Register Number '${req.params.regNo}' not found in the Master Google Sheet (Student_data tab).`,
   });
 });
 
@@ -1029,10 +1239,26 @@ app.get('/api/student/status/:query', async (req: Request, res: Response) => {
 // ==========================================
 
 // Get pending applications scoped to Teacher or HOD
-app.all('/api/faculty/pending', (req: Request, res: Response) => {
+app.all('/api/faculty/pending', async (req: Request, res: Response) => {
   const email = String(req.body?.email || req.query?.email || '').toLowerCase().trim();
 
-  const faculty = facultyData.find((f) => f.email.toLowerCase() === email);
+  if (facultyData.length === 0) {
+    await syncFromMasterSheet();
+  }
+
+  // Allow COE admin email to view all submissions for audit
+  if (email.includes('coe') || email.includes('admin') || coeUsersData.some((u) => u.email.toLowerCase() === email)) {
+    return res.json({
+      success: true,
+      data: submissionsData,
+    });
+  }
+
+  let faculty = facultyData.find((f) => f.email.toLowerCase() === email);
+  if (!faculty) {
+    await syncFromMasterSheet(true);
+    faculty = facultyData.find((f) => f.email.toLowerCase() === email);
+  }
   if (!faculty) {
     return res.status(403).json({
       success: false,
@@ -1145,6 +1371,7 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
     teacherName: newTeacher.name,
     department: newTeacher.department,
     specialization: newTeacher.specialization,
+    semester: newTeacher.semester,
     section: newTeacher.section,
     batch: newTeacher.batch,
   });

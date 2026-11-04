@@ -419,9 +419,9 @@ const otpCache: Record<string, { otp: string; expiresAt: number; role: string }>
 // Official OTP Mailer Transport
 // Configurable via environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL)
 // Also dispatches via Google Apps Script (HTTPS port 443) so OTP delivery works even when Render Free Tier blocks outbound SMTP port 587
-async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, portalRole: string): Promise<boolean> {
+async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, portalRole: string): Promise<{ success: boolean; error?: string }> {
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const smtpPort = Number(process.env.SMTP_PORT) || 587;
+  const configuredPort = Number(process.env.SMTP_PORT) || 465;
   const smtpUser = process.env.SMTP_USER || 'dycoe@hindustanuniv.ac.in';
   const smtpPass = process.env.SMTP_PASS;
   const fromAddress = process.env.FROM_EMAIL || `Controller of Examinations <${smtpUser}>`;
@@ -429,62 +429,72 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
   console.log(`[AUTH-OTP] Generated OTP for ${recipientEmail} [Role: ${portalRole}]: ${otpCode}`);
 
   if (!smtpPass) {
-    console.log(`[SMTP-INFO] No SMTP_PASS specified on server. Generated OTP for ${recipientEmail}: ${otpCode}`);
-    return false;
+    const err = `SMTP_PASS is not configured in Render environment variables for ${smtpUser}.`;
+    console.log(`[SMTP-INFO] ${err}`);
+    return { success: false, error: err };
   }
 
-  try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      connectionTimeout: 4000,
-      greetingTimeout: 4000,
-      socketTimeout: 5000,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-    });
+  const roleTitle =
+    portalRole === 'coe'
+      ? 'Controller of Examinations Administration'
+      : portalRole === 'faculty'
+      ? 'Faculty & Department Review Portal'
+      : 'Convocation Degree Photo Portal';
 
-    const roleTitle =
-      portalRole === 'coe'
-        ? 'Controller of Examinations Administration'
-        : portalRole === 'faculty'
-        ? 'Faculty & Department Review Portal'
-        : 'Convocation Degree Photo Portal';
-
-    await transporter.sendMail({
-      from: fromAddress,
-      to: recipientEmail,
-      subject: `HITS Convocation Clearance - One-Time Passcode (OTP): ${otpCode}`,
-      text: `Dear Member,\n\nYour One-Time Passcode (OTP) for the ${roleTitle} is: ${otpCode}\n\nThis passcode is valid for 10 minutes.\n\nBest regards,\nOffice of the Controller of Examinations (COE)\nHindustan Institute of Technology and Science (HITS)`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
-          <div style="text-align: center; border-bottom: 2px solid #6b21a8; padding-bottom: 16px; margin-bottom: 20px;">
-            <h2 style="color: #4c1d95; margin: 0; font-size: 20px;">Office of Controller of Examinations</h2>
-            <p style="color: #64748b; font-size: 12px; margin: 4px 0 0 0;">Hindustan Institute of Technology and Science (HITS)</p>
-          </div>
-          <p style="color: #334155; font-size: 14px;">Dear Member,</p>
-          <p style="color: #334155; font-size: 14px;">Your One-Time Passcode (OTP) to access the <strong>${roleTitle}</strong> is:</p>
-          <div style="text-align: center; margin: 24px 0;">
-            <span style="display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe; padding: 12px 28px; border-radius: 12px; font-family: monospace;">
-              ${otpCode}
-            </span>
-          </div>
-          <p style="color: #64748b; font-size: 12px; line-height: 1.5;">This verification passcode will expire in 10 minutes. If you did not request this OTP, please contact the Office of the COE immediately.</p>
-          <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center;">
-            Sent officially from <strong>${smtpUser}</strong> • Convocation Photo Clearance Portal
-          </div>
+  const mailOptions = {
+    from: fromAddress,
+    to: recipientEmail,
+    subject: `HITS Convocation Clearance - One-Time Passcode (OTP): ${otpCode}`,
+    text: `Dear Member,\n\nYour One-Time Passcode (OTP) for the ${roleTitle} is: ${otpCode}\n\nThis passcode is valid for 10 minutes.\n\nBest regards,\nOffice of the Controller of Examinations (COE)\nHindustan Institute of Technology and Science (HITS)`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+        <div style="text-align: center; border-bottom: 2px solid #6b21a8; padding-bottom: 16px; margin-bottom: 20px;">
+          <h2 style="color: #4c1d95; margin: 0; font-size: 20px;">Office of Controller of Examinations</h2>
+          <p style="color: #64748b; font-size: 12px; margin: 4px 0 0 0;">Hindustan Institute of Technology and Science (HITS)</p>
         </div>
-      `,
-    });
-    console.log(`[SMTP-SUCCESS] Real email dispatched successfully from ${fromAddress} to ${recipientEmail}`);
-    return true;
-  } catch (err: any) {
-    console.error(`[SMTP-ERROR] Failed to send email to ${recipientEmail}:`, err?.message || err);
-    return false;
+        <p style="color: #334155; font-size: 14px;">Dear Member,</p>
+        <p style="color: #334155; font-size: 14px;">Your One-Time Passcode (OTP) to access the <strong>${roleTitle}</strong> is:</p>
+        <div style="text-align: center; margin: 24px 0;">
+          <span style="display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe; padding: 12px 28px; border-radius: 12px; font-family: monospace;">
+            ${otpCode}
+          </span>
+        </div>
+        <p style="color: #64748b; font-size: 12px; line-height: 1.5;">This verification passcode will expire in 10 minutes. If you did not request this OTP, please contact the Office of the COE immediately.</p>
+        <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center;">
+          Sent officially from <strong>${smtpUser}</strong> • Convocation Photo Clearance Portal
+        </div>
+      </div>
+    `,
+  };
+
+  const portsToTry = configuredPort === 465 ? [465, 587] : [configuredPort, 465];
+  let lastError = '';
+
+  for (const port of portsToTry) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port,
+        secure: port === 465,
+        connectionTimeout: 6000,
+        greetingTimeout: 6000,
+        socketTimeout: 8000,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      await transporter.sendMail(mailOptions);
+      console.log(`[SMTP-SUCCESS] Real email dispatched successfully from ${fromAddress} to ${recipientEmail} via port ${port}`);
+      return { success: true };
+    } catch (err: any) {
+      lastError = err?.message || String(err);
+      console.error(`[SMTP-ERROR] Port ${port} failed for ${recipientEmail}:`, lastError);
+    }
   }
+
+  return { success: false, error: lastError };
 }
 
 // ==========================================
@@ -546,18 +556,19 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   };
 
   // Dispatch official email via Nodemailer (SMTP: dycoe@hindustanuniv.ac.in)
-  const isSent = await sendOfficialOtpEmail(email, otp, portalType);
+  const dispatch = await sendOfficialOtpEmail(email, otp, portalType);
 
-  if (!isSent && !process.env.SMTP_PASS) {
-    return res.json({
-      success: true,
-      message: `OTP generated for ${email}. Note: Real SMTP dispatch requires 'SMTP_PASS' set in Render environment variables.`,
+  if (!dispatch.success) {
+    const errorMsg = dispatch.error || 'SMTP delivery failed.';
+    return res.status(200).json({
+      success: false,
+      message: `Failed to deliver OTP email from ${process.env.SMTP_USER || 'dycoe@hindustanuniv.ac.in'}. ${errorMsg}`,
     });
   }
 
   return res.json({
     success: true,
-    message: `Verification code sent to ${email}. Please check your email inbox.`,
+    message: `Verification code sent to ${email} from dycoe@hindustanuniv.ac.in. Please check your email inbox.`,
   });
 });
 

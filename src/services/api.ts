@@ -20,19 +20,113 @@ export interface ApiResponse<T = any> {
 // In-memory OTP storage for backup validation if network delay occurs
 const simulatedOtps: Record<string, { otp: string; expiresAt: number; portalType: string }> = {};
 
+const DEFAULT_MASTER_SHEET_ID = '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ';
+const DEFAULT_DRIVE_FOLDER_ID = '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI';
+
 // Resolves API endpoint URL: uses VITE_API_BASE_URL (or configured Render URL) when UI is hosted on GitHub Pages,
 // or relative '/api/...' when UI and backend are hosted together on Render.
-function apiUrl(path: string): string {
+function getBackendBaseUrl(): string {
   const envBase = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
   if (envBase) {
-    return `${envBase}${path}`;
+    return envBase;
   }
   const cfg = storage.getConfig();
   if (cfg.scriptUrl && !cfg.scriptUrl.includes('script.google.com')) {
-    const cleanBase = cfg.scriptUrl.trim().replace(/\/+$/, '');
-    return `${cleanBase}${path}`;
+    return cfg.scriptUrl.trim().replace(/\/+$/, '');
   }
-  return path;
+  return '';
+}
+
+function canUseExpressApi(): boolean {
+  const base = getBackendBaseUrl();
+  if (base) return true;
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')) {
+    // GitHub Pages is a static file host and returns 405 Method Not Allowed on POST /api/* unless a Render URL is configured
+    return false;
+  }
+  return true;
+}
+
+function apiUrl(path: string): string {
+  const base = getBackendBaseUrl();
+  return base ? `${base}${path}` : path;
+}
+
+function parseCsvRowsClient(csvText: string): string[][] {
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  return lines.map((line) => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  });
+}
+
+async function syncMasterSheetClientFallback(): Promise<void> {
+  const sheetId = storage.getConfig().spreadsheetId || DEFAULT_MASTER_SHEET_ID;
+  try {
+    const fetchTab = async (tabName: string) => {
+      const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const text = await res.text();
+      if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) return null;
+      return parseCsvRowsClient(text);
+    };
+
+    const [studentRows, facultyRows] = await Promise.all([
+      fetchTab('Student_data'),
+      fetchTab('Faculty'),
+    ]);
+
+    if (studentRows && studentRows.length > 1) {
+      const students = studentRows.slice(1).filter((r) => r[0]).map((r) => ({
+        registerNumber: r[0] || '',
+        name: r[1] || '',
+        fatherName: r[2] || '',
+        gender: r[3] || 'MALE',
+        dob: r[4] || '',
+        nationality: r[5] || 'INDIAN',
+        year: r[6] || 'IV',
+        branch: r[7] || '',
+        specialization: r[8] || 'GENERAL',
+      }));
+      if (students.length > 0) storage.saveStudents(students);
+    }
+
+    if (facultyRows && facultyRows.length > 1) {
+      const faculty: FacultyRecord[] = facultyRows.slice(1).filter((r) => r[0]).map((r) => ({
+        email: (r[0] || '').toLowerCase(),
+        name: r[1] || '',
+        role: ((r[2] || 'TEACHER').toUpperCase()) as any,
+        department: (r[3] || 'ALL').toUpperCase(),
+        specialization: (r[4] || 'ALL').toUpperCase(),
+        semester: (r[5] || 'ALL').toUpperCase(),
+        batch: r[6] || 'ALL',
+        section: (r[7] || 'ALL').toUpperCase(),
+      }));
+      if (faculty.length > 0) storage.saveFaculty(faculty);
+    }
+  } catch {
+    // Ignore client sheet fallback errors
+  }
 }
 
 export const api = {
@@ -71,23 +165,25 @@ export const api = {
       }
     }
 
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl('/api/auth/send-otp'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, portalType }),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        return res;
+    // Try Express backend first when available
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/auth/send-otp'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, portalType }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -124,27 +220,29 @@ export const api = {
       return { success: false, message: 'Email and OTP code are required.' };
     }
 
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl('/api/auth/verify-otp'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanEmail,
-          otp: inputOtp,
-          portalType,
-        }),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        return res;
+    // Try Express backend first when available
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/auth/verify-otp'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            otp: inputOtp,
+            portalType,
+          }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -184,7 +282,11 @@ export const api = {
     }
 
     if (portalType === 'faculty') {
-      const facultyList = storage.getFaculty();
+      let facultyList = storage.getFaculty();
+      if (facultyList.length === 0) {
+        await syncMasterSheetClientFallback();
+        facultyList = storage.getFaculty();
+      }
       const matches = facultyList.filter((f) => f.email.toLowerCase() === cleanEmail);
       if (matches.length === 0) {
         return {
@@ -213,19 +315,22 @@ export const api = {
       return { success: false, message: 'Please enter a valid Register Number.' };
     }
 
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl(`/api/student/lookup/${encodeURIComponent(cleanRegNo)}`));
-      if (response.ok) {
-        const res = await response.json();
-        if (res.success) return res;
+    // Try Express backend first when available
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl(`/api/student/lookup/${encodeURIComponent(cleanRegNo)}`));
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          const res = await response.json();
+          if (res.success || response.status === 404) return res;
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -239,7 +344,11 @@ export const api = {
       }
     }
 
-    const students = storage.getStudents();
+    let students = storage.getStudents();
+    if (students.length === 0) {
+      await syncMasterSheetClientFallback();
+      students = storage.getStudents();
+    }
     const student = students.find((s) => s.registerNumber.toLowerCase() === cleanRegNo);
 
     if (student) {
@@ -270,23 +379,24 @@ export const api = {
 
   // 4. Submit Student Application
   async submitApplication(payload: any): Promise<ApiResponse> {
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl('/api/student/submit'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        if (res.success) return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/student/submit'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -349,19 +459,20 @@ export const api = {
       return { success: false, message: 'Please enter Register Number or Email.' };
     }
 
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl(`/api/student/status/${encodeURIComponent(cleanQuery)}`));
-      if (response.ok) {
-        const res = await response.json();
-        if (res.success) return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl(`/api/student/status/${encodeURIComponent(cleanQuery)}`));
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -412,19 +523,21 @@ export const api = {
   async getPendingApplications(facultyEmail: string): Promise<ApiResponse<SubmissionRecord[]>> {
     const cleanEmail = facultyEmail.toLowerCase().trim();
 
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl(`/api/faculty/pending?email=${encodeURIComponent(cleanEmail)}`));
-      if (response.ok) {
-        const res = await response.json();
-        if (res.success && Array.isArray(res.data)) return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl(`/api/faculty/pending?email=${encodeURIComponent(cleanEmail)}`));
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          const res = await response.json();
+          if (res.success && Array.isArray(res.data)) return res;
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -452,23 +565,24 @@ export const api = {
     role: string;
     facultyEmail: string;
   }): Promise<ApiResponse> {
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl('/api/faculty/action'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        if (res.success) return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/faculty/action'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -502,23 +616,24 @@ export const api = {
     batch: string;
     section: string;
   }): Promise<ApiResponse> {
-    // Try Express backend first
-    try {
-      const response = await fetch(apiUrl('/api/faculty/add-teacher'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        if (res.success) return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/faculty/add-teacher'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const config = storage.getConfig();
-    if (config.scriptUrl) {
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
@@ -547,28 +662,33 @@ export const api = {
 
   // Get COE Overview & System Stats
   async getCoeOverview(streamScope?: string): Promise<ApiResponse> {
-    try {
-      const url = streamScope ? `/api/coe/overview?streamScope=${encodeURIComponent(streamScope)}` : '/api/coe/overview';
-      const response = await fetch(apiUrl(url));
-      if (response.ok) {
-        const res = await response.json();
-        return res;
+    if (canUseExpressApi()) {
+      try {
+        const url = streamScope ? `/api/coe/overview?streamScope=${encodeURIComponent(streamScope)}` : '/api/coe/overview';
+        const response = await fetch(apiUrl(url));
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
+    await syncMasterSheetClientFallback();
     const subs = storage.getSubmissions();
     const students = storage.getStudents();
     const faculty = storage.getFaculty();
+    const sheetId = storage.getConfig().spreadsheetId || DEFAULT_MASTER_SHEET_ID;
+    const folderId = storage.getConfig().parentFolderId || DEFAULT_DRIVE_FOLDER_ID;
 
     return {
       success: true,
       settings: {
-        spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + storage.getConfig().spreadsheetId + '/edit',
-        spreadsheetId: storage.getConfig().spreadsheetId,
-        driveFolderUrl: 'https://drive.google.com/drive/folders/' + storage.getConfig().parentFolderId,
-        driveFolderId: storage.getConfig().parentFolderId,
+        spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${sheetId}/edit`,
+        spreadsheetId: sheetId,
+        driveFolderUrl: `https://drive.google.com/drive/folders/${folderId}`,
+        driveFolderId: folderId,
         academicYear: '2024-2025',
         convocationBatch: '34th Convocation Ceremony',
       },
@@ -588,46 +708,61 @@ export const api = {
 
   // COE Login with Username or Email, and Password or OTP
   async coeLogin(usernameOrEmail: string, password?: string, otp?: string): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/auth/coe-login'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usernameOrEmail, email: usernameOrEmail, password, otp }),
-      });
-      const data = await response.json();
-      if (data.user && !data.coeUser) {
-        data.coeUser = data.user;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/auth/coe-login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usernameOrEmail, email: usernameOrEmail, password, otp }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data.user && !data.coeUser) {
+            data.coeUser = data.user;
+          }
+          return data;
+        }
+      } catch {
+        // Fallback
       }
-      return data;
-    } catch {
-      // Fallback mock login for offline / standard demo
-      const cleanKey = usernameOrEmail.toLowerCase().trim();
-      const isSuper = cleanKey === 'superadmin' || cleanKey === 'admin' || cleanKey.includes('admin');
-      const isEngg = cleanKey.includes('1') || cleanKey.includes('engg');
+    }
+
+    const cleanKey = usernameOrEmail.toLowerCase().trim();
+    const isSuper = cleanKey === 'superadmin' || cleanKey === 'admin';
+    if (isSuper && password && password !== 'Admin@123') {
       return {
-        success: true,
-        message: 'COE authentication successful.',
-        coeUser: {
-          username: isSuper ? 'superadmin' : cleanKey.split('@')[0],
-          email: cleanKey.includes('@') ? cleanKey : `${cleanKey}@hindustanuniv.ac.in`,
-          name: isSuper ? 'Chief COE Super Admin' : isEngg ? 'ACOE (Engineering)' : 'ACOE (Non-Engineering)',
-          role: isSuper ? 'SUPER_ADMIN' : 'ACOE',
-          streamScope: isSuper ? 'ALL' : isEngg ? 'ENGINEERING' : 'NON_ENGINEERING',
-          isDefaultPassword: password === 'Admin@123' || password === 'Acoe@123',
-        },
+        success: false,
+        message: 'Invalid Super Admin username or password.',
       };
     }
+    const isEngg = cleanKey.includes('1') || cleanKey.includes('engg');
+    return {
+      success: true,
+      message: 'COE authentication successful.',
+      coeUser: {
+        username: isSuper ? 'superadmin' : cleanKey.split('@')[0],
+        email: cleanKey.includes('@') ? cleanKey : `${cleanKey}@hindustanuniv.ac.in`,
+        name: isSuper ? 'Chief COE Super Admin' : isEngg ? 'ACOE (Engineering)' : 'ACOE (Non-Engineering)',
+        role: isSuper ? 'SUPER_ADMIN' : 'ACOE',
+        streamScope: isSuper ? 'ALL' : isEngg ? 'ENGINEERING' : 'NON_ENGINEERING',
+        isDefaultPassword: password === 'Admin@123' || password === 'Acoe@123',
+      },
+    };
   },
 
   // Get list of registered ACOE Users (Super Admin only)
   async getCoeUsers(): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/users'));
-      if (response.ok) {
-        return await response.json();
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/users'));
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
     return {
       success: true,
@@ -637,106 +772,136 @@ export const api = {
 
   // Add or Appoint new ACOE Administrator
   async addAcoeUser(payload: { email: string; name: string; password?: string; role?: string; streamScope?: string; otpEnabled?: boolean }): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/add-acoe'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      return data;
-    } catch {
-      return {
-        success: true,
-        message: `ACOE user ${payload.name} (${payload.email}) registered successfully.`,
-      };
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/add-acoe'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
     }
+    return {
+      success: true,
+      message: `ACOE user ${payload.name} (${payload.email}) registered successfully.`,
+    };
   },
 
   // Toggle Email OTP Alone Any Time (Super Admin Action)
   async toggleAcoeOtp(email: string, otpEnabled: boolean): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/toggle-otp'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otpEnabled }),
-      });
-      return await response.json();
-    } catch {
-      return {
-        success: true,
-        message: `Email OTP status updated for ${email}.`,
-      };
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/toggle-otp'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, otpEnabled }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
     }
+    return {
+      success: true,
+      message: `Email OTP status updated for ${email}.`,
+    };
   },
 
   // Update ACOE Email or Name
   async updateAcoeUser(payload: { oldEmail: string; newEmail?: string; name?: string; otpEnabled?: boolean }): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/update-acoe'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      return await response.json();
-    } catch {
-      return {
-        success: true,
-        message: `ACOE details updated.`,
-      };
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/update-acoe'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
     }
+    return {
+      success: true,
+      message: `ACOE details updated.`,
+    };
   },
 
   // Delete / Remove ACOE User Email
   async deleteAcoeUser(email: string): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/delete-acoe'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      return await response.json();
-    } catch {
-      return {
-        success: true,
-        message: `ACOE user ${email} removed.`,
-      };
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/delete-acoe'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
     }
+    return {
+      success: true,
+      message: `ACOE user ${email} removed.`,
+    };
   },
 
   // Change COE Password
   async changeCoePassword(identifier: string, newPassword: string): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/change-password'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: identifier, username: identifier, newPassword }),
-      });
-      const data = await response.json();
-      return data;
-    } catch {
-      return {
-        success: true,
-        message: 'Password updated successfully.',
-      };
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/change-password'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: identifier, username: identifier, newPassword }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
     }
+    return {
+      success: true,
+      message: 'Password updated successfully.',
+    };
   },
 
 
   // Update COE Drive & Spreadsheet Config
   async updateCoeConfig(payload: Partial<CoeSettings>): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/config'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/config'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const cfg = storage.getConfig();
@@ -761,18 +926,20 @@ export const api = {
 
   // COE Add Department HOD
   async addHod(payload: { email: string; name: string; department: string; specialization?: string }): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/add-hod'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/add-hod'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     const cleanEmail = payload.email.toLowerCase().trim();
@@ -806,18 +973,20 @@ export const api = {
 
   // COE Import Sheets
   async importSheets(payload: { students?: any[]; submissions?: any[]; faculty?: any[] }): Promise<ApiResponse> {
-    try {
-      const response = await fetch(apiUrl('/api/coe/import-sheets'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        const res = await response.json();
-        return res;
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/import-sheets'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
 
     if (payload.students) storage.saveStudents(payload.students);

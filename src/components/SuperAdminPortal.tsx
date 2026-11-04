@@ -44,9 +44,9 @@ export const SuperAdminPortal: React.FC = () => {
     return sessionStorage.getItem('superadmin_session_auth') === 'true';
   });
   const [adminUsername, setAdminUsername] = useState<string>(() => {
-    return sessionStorage.getItem('superadmin_session_username') || 'superadmin';
+    return sessionStorage.getItem('superadmin_session_username') || '';
   });
-  const [passwordInput, setPasswordInput] = useState<string>('Admin@123');
+  const [passwordInput, setPasswordInput] = useState<string>('');
   const [isSubmittingAuth, setIsSubmittingAuth] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string>('');
   const [authSuccess, setAuthSuccess] = useState<string>('');
@@ -254,10 +254,10 @@ export const SuperAdminPortal: React.FC = () => {
             <div className="mt-4 p-4 bg-amber-50/70 border border-amber-200 rounded-2xl text-left space-y-2">
               <div className="font-bold text-amber-900 text-xs flex items-center gap-1.5">
                 <BookOpen className="w-4 h-4 text-amber-700" />
-                <span>What Details Are Needed For Chief Super Admin:</span>
+                <span>Chief Super Admin Responsibilities:</span>
               </div>
               <ul className="text-[11px] text-amber-800 space-y-1 list-disc list-inside">
-                <li><strong>Super Admin Username</strong> (<code className="font-mono">superadmin</code>) and Password (<code className="font-mono">Admin@123</code>).</li>
+                <li><strong>Super Admin Credentials</strong>: Sign in with your authorized Chief Super Admin username and password.</li>
                 <li><strong>ACOE Officer Management</strong>: Add official ACOE emails and toggle Email OTP dispatch per ACOE user.</li>
                 <li><strong>System Configuration</strong>: Manage Google Drive and Google Sheets master URLs dynamically.</li>
               </ul>
@@ -308,7 +308,7 @@ export const SuperAdminPortal: React.FC = () => {
                   type="password"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="Admin@123"
+                  placeholder="Enter Super Admin password"
                   className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all"
                   required
                 />

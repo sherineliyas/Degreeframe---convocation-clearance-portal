@@ -64,7 +64,7 @@ export const CoePortal: React.FC = () => {
   });
 
   const [adminEmail, setAdminEmail] = useState<string>(() => {
-    return sessionStorage.getItem('coe_session_email') || 'acoe1@hindustanuniv.ac.in';
+    return sessionStorage.getItem('coe_session_email') || '';
   });
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [authMode, setAuthMode] = useState<'PASSWORD' | 'OTP'>('OTP');
@@ -85,9 +85,9 @@ export const CoePortal: React.FC = () => {
   const [acoeUsersList, setAcoeUsersList] = useState<CoeUserInfo[]>([]);
   const [isLoadingAcoeUsers, setIsLoadingAcoeUsers] = useState<boolean>(false);
   const [acoeForm, setAcoeForm] = useState({
-    email: 'acoe3@hindustanuniv.ac.in',
-    name: 'ACOE (Engineering Stream)',
-    password: 'Acoe@123',
+    email: '',
+    name: '',
+    password: '',
     role: 'ACOE',
     streamScope: 'ENGINEERING' as 'ENGINEERING' | 'NON_ENGINEERING',
   });
@@ -382,25 +382,6 @@ export const CoePortal: React.FC = () => {
   };
 
 
-  // Reset Demo Data
-  const handleResetDemoData = async () => {
-    if (!window.confirm('Reset all clearance submissions and records to initial demo scenarios?')) return;
-    try {
-      setIsLoadingData(true);
-      const res = await fetch('/api/coe/reset-demo', { method: 'POST' });
-      if (res.ok) {
-        setNotification({
-          type: 'success',
-          message: 'All databases and submissions restored to initial demo scenarios.',
-        });
-        await loadCoeData();
-      }
-    } catch {
-      setNotification({ type: 'error', message: 'Failed to reset demo records.' });
-    } finally {
-      setIsLoadingData(false);
-    }
-  };
 
   // Handle Save Drive & Sheet Config
   const handleSaveConfig = async (e: React.FormEvent) => {

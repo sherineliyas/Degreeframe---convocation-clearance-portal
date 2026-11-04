@@ -442,7 +442,7 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   const isGmail = email.endsWith('@gmail.com');
 
   if (portalType === 'coe') {
-    if (!isUnivStaff && email !== 'sathishbackup4992@gmail.com' && !email.includes('coe') && !email.includes('admin')) {
+    if (!isUnivStaff && !email.includes('coe') && !email.includes('admin')) {
       return res.status(403).json({
         success: false,
         message: 'Access Denied: Controller of Examinations (COE) portal is restricted to authorized accounts (@hindustanuniv.ac.in).',
@@ -485,8 +485,7 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
 
   return res.json({
     success: true,
-    message: `Verification code sent to ${email}. (Demo Passcode: 123456 or ${otp})`,
-    demoOtp: '123456',
+    message: `Verification code sent to ${email}. Please check your email inbox.`,
   });
 });
 
@@ -495,23 +494,20 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
   const inputOtp = String(req.body.otp || '').trim();
   const portalType = String(req.body.portalType || 'student').toLowerCase();
 
-  const isDemoMasterOtp = inputOtp === '123456';
   const record = otpCache[email];
 
-  if (!isDemoMasterOtp) {
-    if (!record || Date.now() > record.expiresAt) {
-      return res.status(400).json({
-        success: false,
-        message: 'OTP has expired or was not requested. Use demo passcode 123456 or request a new code.',
-      });
-    }
+  if (!record || Date.now() > record.expiresAt) {
+    return res.status(400).json({
+      success: false,
+      message: 'OTP has expired or was not requested. Please request a new code.',
+    });
+  }
 
-    if (record.otp !== inputOtp) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid OTP code. Use demo passcode 123456 or check your code.',
-      });
-    }
+  if (record.otp !== inputOtp) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid OTP code. Please check your email and try again.',
+    });
   }
 
   delete otpCache[email];
@@ -595,7 +591,7 @@ app.post('/api/auth/coe-login', (req: Request, res: Response) => {
         isDefaultPassword: true,
       };
       coeUsersData.push(coeUser);
-    } else if (identifier.endsWith('@hindustanuniv.ac.in') || identifier === 'sathishbackup4992@gmail.com') {
+    } else if (identifier.endsWith('@hindustanuniv.ac.in')) {
       coeUser = {
         email: identifier,
         name: 'COE Administrator',
@@ -608,23 +604,22 @@ app.post('/api/auth/coe-login', (req: Request, res: Response) => {
     } else {
       return res.status(403).json({
         success: false,
-        message: 'Access Denied: Unregistered COE account or username. Please log in as Super Admin (username: superadmin) to add users.',
+        message: 'Access Denied: Unregistered COE account or username.',
       });
     }
   }
 
-  const isDemoPasscode = inputOtp === '123456' || password === '123456';
   const isCorrectPassword = Boolean(
     password && (password === coeUser.password || password === 'Admin@123' || password === 'Acoe@123')
   );
 
   const cachedOtp = otpCache[identifier] || (coeUser.email ? otpCache[coeUser.email] : undefined);
-  const isOtpValid = Boolean(cachedOtp && (cachedOtp.otp === inputOtp || inputOtp === '123456'));
+  const isOtpValid = Boolean(cachedOtp && cachedOtp.otp === inputOtp);
 
-  if (!isDemoPasscode && !isCorrectPassword && !isOtpValid) {
+  if (!isCorrectPassword && !isOtpValid) {
     return res.status(400).json({
       success: false,
-      message: 'Invalid password or OTP credentials. (Chief Super Admin default password: Admin@123, ACOE default: Acoe@123)',
+      message: 'Invalid username, password, or OTP credentials.',
     });
   }
 
@@ -712,7 +707,7 @@ app.post('/api/coe/add-acoe', async (req: Request, res: Response) => {
   const cleanEmail = String(email || '').toLowerCase().trim();
   const cleanName = String(name || '').trim();
 
-  if (!cleanEmail || (!cleanEmail.endsWith('@hindustanuniv.ac.in') && cleanEmail !== 'sathishbackup4992@gmail.com')) {
+  if (!cleanEmail || !cleanEmail.endsWith('@hindustanuniv.ac.in')) {
     return res.status(400).json({
       success: false,
       message: 'Official ACOE email must end with @hindustanuniv.ac.in.',

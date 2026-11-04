@@ -49,7 +49,7 @@ export const api = {
     const isPersonalGmail = cleanEmail.endsWith('@gmail.com');
 
     if (portalType === 'coe') {
-      if (!isFacultyOfficialDomain && cleanEmail !== 'sathishbackup4992@gmail.com') {
+      if (!isFacultyOfficialDomain) {
         return {
           success: false,
           message: 'Access Denied: Controller of Examinations (COE) portal is restricted to university administrator accounts (@hindustanuniv.ac.in).',
@@ -164,11 +164,10 @@ export const api = {
     }
 
     const stored = simulatedOtps[cleanEmail];
-    const isDemoOtp = inputOtp === '123456';
-    if (!isDemoOtp && (!stored || stored.otp !== inputOtp)) {
+    if (!stored || stored.otp !== inputOtp) {
       return {
         success: false,
-        message: 'Invalid or expired OTP code. Use demo passcode 123456 or request a new code.',
+        message: 'Invalid or expired OTP code. Please request a new code.',
       };
     }
 
@@ -632,10 +631,7 @@ export const api = {
     }
     return {
       success: true,
-      users: [
-        { email: 'acoe1@hindustanuniv.ac.in', name: 'ACOE Engineering', role: 'ACOE', streamScope: 'ENGINEERING', isDefaultPassword: true },
-        { email: 'acoe2@hindustanuniv.ac.in', name: 'ACOE Non-Engineering', role: 'ACOE', streamScope: 'NON_ENGINEERING', isDefaultPassword: true },
-      ],
+      users: [],
     };
   },
 

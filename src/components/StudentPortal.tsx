@@ -354,88 +354,6 @@ export const StudentPortal: React.FC = () => {
     };
   };
 
-  // Generate compliant sample photo for fast demo testing
-  const handleLoadSamplePhoto = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 300;
-    canvas.height = 350;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      // White studio background
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, 300, 350);
-
-      // Gradient border
-      const grad = ctx.createLinearGradient(0, 0, 0, 350);
-      grad.addColorStop(0, '#f8fafc');
-      grad.addColorStop(1, '#e2e8f0');
-      ctx.fillStyle = grad;
-      ctx.fillRect(8, 8, 284, 334);
-
-      // Inner white
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(12, 12, 276, 326);
-
-      // Formal Dark Blazer
-      ctx.fillStyle = '#0f172a';
-      ctx.beginPath();
-      ctx.moveTo(35, 350);
-      ctx.lineTo(80, 220);
-      ctx.lineTo(150, 275);
-      ctx.lineTo(220, 220);
-      ctx.lineTo(265, 350);
-      ctx.closePath();
-      ctx.fill();
-
-      // White Collared Shirt
-      ctx.fillStyle = '#FFFFFF';
-      ctx.beginPath();
-      ctx.moveTo(105, 220);
-      ctx.lineTo(150, 275);
-      ctx.lineTo(195, 220);
-      ctx.lineTo(150, 210);
-      ctx.closePath();
-      ctx.fill();
-
-      // Formal Maroon Tie
-      ctx.fillStyle = '#881337';
-      ctx.beginPath();
-      ctx.moveTo(144, 225);
-      ctx.lineTo(156, 225);
-      ctx.lineTo(153, 295);
-      ctx.lineTo(150, 310);
-      ctx.lineTo(147, 295);
-      ctx.closePath();
-      ctx.fill();
-
-      // Head / Face
-      ctx.fillStyle = '#fde68a';
-      ctx.beginPath();
-      ctx.ellipse(150, 150, 50, 62, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Hair
-      ctx.fillStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.arc(150, 135, 52, Math.PI, Math.PI * 2);
-      ctx.fill();
-
-      // Subtitle
-      ctx.fillStyle = '#64748b';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('CONVOCATION PHOTO SAMPLE', 150, 335);
-
-      const sampleData = canvas.toDataURL('image/jpeg', 0.85);
-      const stringLength = sampleData.length - 'data:image/jpeg;base64,'.length;
-      const sizeInBytes = 4 * Math.ceil(stringLength / 3) * 0.5624896334383;
-      const kb = Number((sizeInBytes / 1024).toFixed(1));
-
-      setPhotoDataUrl(sampleData);
-      setPhotoSizeKb(kb);
-      setPhotoError(null);
-    }
-  };
 
   // Step 2 Proceed to Step 3
   const handleProceedToPhoto = () => {
@@ -1250,14 +1168,6 @@ export const StudentPortal: React.FC = () => {
                               >
                                 Choose Photo File
                               </label>
-                              <button
-                                type="button"
-                                onClick={handleLoadSamplePhoto}
-                                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl cursor-pointer shadow-2xs flex items-center gap-1.5 transition-all"
-                              >
-                                <Sparkles className="w-3.5 h-3.5" />
-                                <span>Load Sample Photo (Demo)</span>
-                              </button>
                             </div>
                           </div>
 
@@ -1361,53 +1271,8 @@ export const StudentPortal: React.FC = () => {
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Track Convocation Clearance Status</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Search by your Register Number or Student Email to check your real-time approval stage across Teacher, HOD, and Dean clearance.
+                  Search by your Register Number or Student Email to check your real-time approval stage across Teacher and HOD clearance.
                 </p>
-
-                {/* Demo Track Chips */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-2">
-                  <span className="text-[11px] font-semibold text-slate-500">Demo Scenarios:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTrackQuery('2021ECE201');
-                      handleCheckStatus('2021ECE201');
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-mono text-[11px] font-semibold border border-emerald-200 cursor-pointer transition-colors"
-                  >
-                    2021ECE201 (Approved)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTrackQuery('2021CSE103');
-                      handleCheckStatus('2021CSE103');
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-mono text-[11px] font-semibold border border-indigo-200 cursor-pointer transition-colors"
-                  >
-                    2021CSE103 (Pending HOD)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTrackQuery('2021CSE102');
-                      handleCheckStatus('2021CSE102');
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 font-mono text-[11px] font-semibold border border-amber-200 cursor-pointer transition-colors"
-                  >
-                    2021CSE102 (Pending Teacher)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTrackQuery('2021MECH301');
-                      handleCheckStatus('2021MECH301');
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-mono text-[11px] font-semibold border border-rose-200 cursor-pointer transition-colors"
-                  >
-                    2021MECH301 (Rejected)
-                  </button>
-                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2.5">

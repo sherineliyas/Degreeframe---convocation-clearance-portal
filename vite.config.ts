@@ -27,15 +27,26 @@ export default defineConfig(() => {
         },
         closeBundle() {
           try {
-            const assetsDir = path.resolve(__dirname, 'dist/assets');
-            const outDir = path.resolve(__dirname, 'public/gh-pages');
+            const distDir = path.resolve(__dirname, 'dist');
+            const assetsDir = path.resolve(distDir, 'assets');
             if (!fs.existsSync(assetsDir)) return;
-            fs.mkdirSync(outDir, { recursive: true });
+
             const files = fs.readdirSync(assetsDir);
             const jsFile = files.find((f) => f.startsWith('index-') && f.endsWith('.js'));
             const cssFile = files.find((f) => f.startsWith('index-') && f.endsWith('.css'));
-            if (jsFile) fs.copyFileSync(path.join(assetsDir, jsFile), path.join(outDir, 'app.js'));
-            if (cssFile) fs.copyFileSync(path.join(assetsDir, cssFile), path.join(outDir, 'app.css'));
+
+            const targetDirs = [
+              path.resolve(__dirname, 'public/gh-pages'),
+              path.resolve(distDir, 'public/gh-pages'),
+              path.resolve(distDir, 'gh-pages'),
+              distDir,
+            ];
+
+            for (const dir of targetDirs) {
+              fs.mkdirSync(dir, { recursive: true });
+              if (jsFile) fs.copyFileSync(path.join(assetsDir, jsFile), path.join(dir, 'app.js'));
+              if (cssFile) fs.copyFileSync(path.join(assetsDir, cssFile), path.join(dir, 'app.css'));
+            }
           } catch {
             // Ignore copy errors in read-only environments
           }

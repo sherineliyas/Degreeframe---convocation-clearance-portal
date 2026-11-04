@@ -1382,7 +1382,41 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
 // 5. VITE SPA MIDDLEWARE / PRODUCTION STATIC
 // ==========================================
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.resolve(__dirname, 'dist');
+  const publicPath = path.resolve(__dirname, 'public');
+  const ghPagesPath = path.resolve(__dirname, 'public/gh-pages');
+
+  // Always serve /public and /gh-pages static paths so ./public/gh-pages/app.js and app.css never 404
+  app.use('/public', express.static(publicPath));
+  app.use('/gh-pages', express.static(ghPagesPath));
+
+  // Fallback handler if a client requests /app.js or /app.css or /public/gh-pages/app.js directly
+  const serveFallbackBundle = (ext: '.js' | '.css', contentType: string) => (req: Request, res: Response, next: () => void) => {
+    const directCandidate = path.join(ghPagesPath, `app${ext}`);
+    if (fs.existsSync(directCandidate)) {
+      res.setHeader('Content-Type', contentType);
+      return res.sendFile(directCandidate);
+    }
+    const assetsDir = path.join(distPath, 'assets');
+    if (fs.existsSync(assetsDir)) {
+      const match = fs.readdirSync(assetsDir).find((f) => f.startsWith('index-') && f.endsWith(ext));
+      if (match) {
+        res.setHeader('Content-Type', contentType);
+        return res.sendFile(path.join(assetsDir, match));
+      }
+    }
+    next();
+  };
+
+  app.get(['/app.js', '/gh-pages/app.js', '/public/gh-pages/app.js'], serveFallbackBundle('.js', 'application/javascript; charset=utf-8'));
+  app.get(['/app.css', '/gh-pages/app.css', '/public/gh-pages/app.css'], serveFallbackBundle('.css', 'text/css; charset=utf-8'));
+
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    Boolean(process.env.RENDER) ||
+    (process.env.DISABLE_HMR !== 'true' && fs.existsSync(path.join(distPath, 'index.html')));
+
+  if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: process.env.DISABLE_HMR !== 'true' },
@@ -1390,9 +1424,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.use(express.static(distPath));
     app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 

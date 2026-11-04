@@ -127,7 +127,7 @@ DegreeFrame is built on a **3-Layer Cloud Architecture** designed so that heavy 
 2. Go to [Render Dashboard](https://dashboard.render.com/) $\rightarrow$ **New +** $\rightarrow$ **Web Service** and connect your GitHub repository.
 3. Configure the Render service:
    * **Runtime**: `Node`
-   * **Build Command**: `npm install && npm run build`
+   * **Build Command**: `npm install --legacy-peer-deps && npm run build`
    * **Start Command**: `npm start`
 4. Add the following **Environment Variables** in Render:
    ```env
@@ -139,7 +139,40 @@ DegreeFrame is built on a **3-Layer Cloud Architecture** designed so that heavy 
    FROM_EMAIL="Controller of Examinations <coe@hindustanuniv.ac.in>"
    GAS_WEB_APP_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
    ```
-5. Click **Deploy Web Service**. Share your single Render URL (`https://your-app.onrender.com`) with Students, Faculty, HODs, and COE!
+5. Click **Deploy Web Service**.
+
+---
+
+## 🌐 Production Access: Render URL vs. GitHub Pages (`405` Static-Host Protection)
+
+### Why `405 Method Not Allowed` Happens on Static Hosts
+If you open the **GitHub Pages** URL (`https://<username>.github.io/<repo>/`) without configuring `VITE_API_BASE_URL` to point to your Render backend, relative `POST /api/...` requests would hit GitHub Pages' static file server, which rejects all `POST` requests with **`405 Method Not Allowed`**.
+
+### Built-In Protection in `src/services/api.ts`
+1. **Static-Host Guard (`canUseExpressApi`)**:
+   * Automatically detects when the portal is running on `*.github.io` without a configured Render backend URL (`VITE_API_BASE_URL`).
+   * Prevents `POST /api/*` calls from hitting GitHub's static server and instead routes operations directly to your **Google Apps Script Web App (`VITE_GAS_WEB_APP_URL`)** and syncs directly with the **3-Tab Master Google Sheet** (`Student_data`, `Submissions`, `Faculty`).
+2. **Content-Type & Status Validation**:
+   * All `/api/*` requests verify `response.status !== 405` and `content-type: application/json` before parsing JSON, gracefully falling back if the Express backend is unreachable.
+
+### Two Ways to Run in Production
+
+#### Option A — Use Your Render URL Directly (Recommended)
+* Open and share your **Render Web Service URL** (`https://<your-render-service>.onrender.com`).
+* Render serves both the React frontend and the Express backend (`server.ts`) from the same origin, so all `/api/*` routes and Nodemailer SMTP OTP emails work natively with zero `405` errors:
+  * **Student Portal**: `https://<your-render-service>.onrender.com/#/student`
+  * **Faculty & HOD Portal**: `https://<your-render-service>.onrender.com/#/faculty`
+  * **COE Admin Portal**: `https://<your-render-service>.onrender.com/#/coe`
+  * **Super Admin Portal**: `https://<your-render-service>.onrender.com/#/superadmin`
+
+#### Option B — Use GitHub Pages Connected to Your Render Backend
+* If you want users visiting `https://<username>.github.io/<repo>/` to route API and SMTP OTP requests through your Render backend:
+  1. Go to your **GitHub Repository** $\rightarrow$ **Settings** $\rightarrow$ **Secrets and variables** $\rightarrow$ **Actions** $\rightarrow$ **Variables** tab.
+  2. Click **New repository variable** and add:
+     * **Name**: `VITE_API_BASE_URL`
+     * **Value**: `https://<your-render-service>.onrender.com` *(no trailing slash)*
+  3. Optionally also add `VITE_GAS_WEB_APP_URL` set to your Google Apps Script `/exec` URL.
+  4. Re-run the GitHub Actions deployment workflow (or push a commit to `main`).
 
 ---
 

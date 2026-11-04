@@ -303,7 +303,7 @@ export const UserManualModal: React.FC<Props> = ({ isOpen, onClose, defaultRole 
                   Chief COE Super Admin Control Hub Manual
                 </h3>
                 <p className="text-slate-500 text-xs mt-1">
-                  How the Chief Super Admin appoints ACOE users, toggles Email OTP dispatch per ACOE user, and configures system-wide governance parameters.
+                  How the Chief Super Admin appoints ACOE users, toggles Email OTP dispatch per ACOE user, and monitors university-wide clearance metrics.
                 </p>
               </div>
 
@@ -314,7 +314,7 @@ export const UserManualModal: React.FC<Props> = ({ isOpen, onClose, defaultRole 
                     <span>Super Admin Authentication</span>
                   </div>
                   <p className="text-xs text-slate-600 pl-8">
-                    Access the <strong>Super Admin</strong> portal and sign in using the Chief Super Admin credentials. You can update your Super Admin password anytime from the top header.
+                    Access the <strong>Super Admin</strong> portal and sign in using the Chief Super Admin credentials.
                   </p>
                 </div>
 
@@ -331,10 +331,10 @@ export const UserManualModal: React.FC<Props> = ({ isOpen, onClose, defaultRole 
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
                   <div className="font-bold text-slate-900 flex items-center gap-2">
                     <span className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs">3</span>
-                    <span>System Configuration & Governance Parameters</span>
+                    <span>University Clearance Metrics & Maintenance</span>
                   </div>
                   <p className="text-xs text-slate-600 pl-8">
-                    Update Google Drive folder URLs, Google Sheets master URLs, convocation batch names, and academic years dynamically from the UI.
+                    Monitor university-wide student counts, convocation photo submissions, approved degrees, and assigned department HODs across all streams while COE officers manage Google Drive and Master Sheet configuration.
                   </p>
                 </div>
               </div>

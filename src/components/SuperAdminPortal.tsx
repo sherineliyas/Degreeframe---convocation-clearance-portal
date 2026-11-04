@@ -9,7 +9,6 @@ import {
   Building,
   X,
   User,
-  Sparkles,
   LogOut as LogOutIcon,
   Lock,
   KeyRound,
@@ -17,7 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { UserManualModal } from './UserManualModal';
-import { CoeSettings, CoeOverviewStats } from '../types';
+import { CoeOverviewStats } from '../types';
 
 interface SuperAdminInfo {
   username: string;
@@ -52,24 +51,15 @@ export const SuperAdminPortal: React.FC = () => {
   const [authSuccess, setAuthSuccess] = useState<string>('');
 
   // Super Admin Data State
-  const [activeTab, setActiveTab] = useState<'acoe_management' | 'system_config' | 'system_stats'>('acoe_management');
+  const [activeTab, setActiveTab] = useState<'acoe_management' | 'system_stats'>('acoe_management');
   const [coeUsersList, setCoeUsersList] = useState<CoeUserAccount[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isManualOpen, setIsManualOpen] = useState<boolean>(false);
 
-  // Config Form State
-  const [driveUrlInput, setDriveUrlInput] = useState('');
-  const [sheetUrlInput, setSheetUrlInput] = useState('');
-  const [batchInput, setBatchInput] = useState('');
-  const [yearInput, setYearInput] = useState('');
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
-
   // ACOE Management State
   const [acoeForm, setAcoeForm] = useState({ email: '', name: '', otpEnabled: true });
   const [isAddingAcoe, setIsAddingAcoe] = useState(false);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [settings, setSettings] = useState<CoeSettings | null>(null);
   const [stats, setStats] = useState<CoeOverviewStats>({
     pendingTeacher: 0,
     pendingHod: 0,
@@ -87,17 +77,8 @@ export const SuperAdminPortal: React.FC = () => {
     setIsLoading(true);
     try {
       const overviewRes = await api.getCoeOverview('ALL');
-      if (overviewRes.success) {
-        if (overviewRes.settings) {
-          setSettings(overviewRes.settings);
-          setDriveUrlInput(overviewRes.settings.driveFolderUrl);
-          setSheetUrlInput(overviewRes.settings.spreadsheetUrl);
-          setBatchInput(overviewRes.settings.convocationBatch);
-          setYearInput(overviewRes.settings.academicYear);
-        }
-        if (overviewRes.stats) {
-          setStats(overviewRes.stats);
-        }
+      if (overviewRes.success && overviewRes.stats) {
+        setStats(overviewRes.stats);
       }
 
       const usersRes = await api.getCoeUsers();
@@ -207,30 +188,6 @@ export const SuperAdminPortal: React.FC = () => {
     }
   };
 
-  const handleSaveConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingConfig(true);
-    setNotification(null);
-    try {
-      const res = await api.updateCoeConfig({
-        driveFolderUrl: driveUrlInput,
-        spreadsheetUrl: sheetUrlInput,
-        convocationBatch: batchInput,
-        academicYear: yearInput,
-      });
-      if (res.success) {
-        setNotification({ type: 'success', message: 'System configuration and governance parameters updated successfully.' });
-        loadData();
-      } else {
-        setNotification({ type: 'error', message: res.message || 'Failed to update configuration.' });
-      }
-    } catch (e: any) {
-      setNotification({ type: 'error', message: 'Error updating system configuration.' });
-    } finally {
-      setIsSavingConfig(false);
-    }
-  };
-
 
   // -------------------------------------------------------------
   // RENDER 1: AUTHENTICATION SCREEN (USERNAME & PASSWORD ONLY)
@@ -259,7 +216,7 @@ export const SuperAdminPortal: React.FC = () => {
               <ul className="text-[11px] text-amber-800 space-y-1 list-disc list-inside">
                 <li><strong>Super Admin Credentials</strong>: Sign in with your authorized Chief Super Admin username and password.</li>
                 <li><strong>ACOE Officer Management</strong>: Add official ACOE emails and toggle Email OTP dispatch per ACOE user.</li>
-                <li><strong>System Configuration</strong>: Manage Google Drive and Google Sheets master URLs dynamically.</li>
+                <li><strong>University Clearance Metrics</strong>: Oversee university-wide convocation photo submission and approval statistics.</li>
               </ul>
             </div>
           </div>
@@ -370,7 +327,7 @@ export const SuperAdminPortal: React.FC = () => {
               <span>Chief COE Super Admin Control Hub</span>
             </h1>
             <p className="text-xs sm:text-sm text-amber-100/90 mt-1 max-w-2xl">
-              Dedicated provision center to manage Assistant COE (ACOE) users, define Google Drive/Sheet architecture, and oversee overall university convocation photo clearance.
+              Dedicated provision center to manage Assistant COE (ACOE) users and oversee overall university convocation photo clearance.
             </p>
           </div>
 
@@ -381,15 +338,6 @@ export const SuperAdminPortal: React.FC = () => {
             >
               <BookOpen className="w-3.5 h-3.5" />
               Super Admin Manual
-            </button>
-            <button
-              onClick={loadData}
-              disabled={isLoading}
-              title="Sync latest records from server"
-              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-sm transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              Sync Data
             </button>
             <button
               onClick={handleLogout}
@@ -441,18 +389,6 @@ export const SuperAdminPortal: React.FC = () => {
         >
           <UserPlus className="w-4 h-4" />
           Appoint & Manage ACOE Users ({coeUsersList.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('system_config')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'system_config'
-              ? 'bg-amber-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Building className="w-4 h-4" />
-          System Configuration & Governance
         </button>
 
         <button
@@ -655,140 +591,7 @@ export const SuperAdminPortal: React.FC = () => {
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* TAB 2: SYSTEM CONFIGURATION & GOVERNANCE */}
-      {/* ------------------------------------------------------------- */}
-      {activeTab === 'system_config' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Config Form */}
-            <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-5">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">System Configuration & Storage Parameters</h2>
-                <p className="text-xs text-slate-500">Manage Google Drive destination folders, Google Sheets synchronization, and active convocation cycles</p>
-              </div>
-
-              <form onSubmit={handleSaveConfig} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Google Drive Folder URL *
-                  </label>
-                  <input
-                    type="text"
-                    value={driveUrlInput}
-                    onChange={(e) => setDriveUrlInput(e.target.value)}
-                    placeholder="https://drive.google.com/drive/folders/..."
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                    required
-                  />
-                  <span className="text-[10px] text-slate-400 mt-1 block">
-                    Target folder where student passport photos are stored
-                  </span>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Google Spreadsheet URL *
-                  </label>
-                  <input
-                    type="text"
-                    value={sheetUrlInput}
-                    onChange={(e) => setSheetUrlInput(e.target.value)}
-                    placeholder="https://docs.google.com/spreadsheets/d/..."
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                    required
-                  />
-                  <span className="text-[10px] text-slate-400 mt-1 block">
-                    Master synchronization spreadsheet for student data
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Convocation Batch Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={batchInput}
-                      onChange={(e) => setBatchInput(e.target.value)}
-                      placeholder="34th Convocation Ceremony"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Academic Year *
-                    </label>
-                    <input
-                      type="text"
-                      value={yearInput}
-                      onChange={(e) => setYearInput(e.target.value)}
-                      placeholder="2024-2025"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSavingConfig}
-                  className="py-2.5 px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
-                >
-                  {isSavingConfig ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Saving Configuration...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="w-4 h-4" />
-                      Save System Configuration
-                    </>
-                  )}
-                </button>
-              </form>
-            </div>
-
-            {/* Advantage of Config UI Card */}
-            <div className="bg-gradient-to-br from-amber-50 via-purple-50 to-indigo-50 p-6 rounded-3xl border border-amber-200 shadow-xs space-y-4">
-              <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
-                <Sparkles className="w-5 h-5 text-amber-700" />
-                <span>Advantages of Super Admin Config UI</span>
-              </div>
-
-              <div className="space-y-3 text-xs text-slate-700">
-                <div className="bg-white/80 p-3 rounded-xl border border-amber-100 shadow-2xs">
-                  <div className="font-bold text-slate-900 mb-1">⚡ Runtime Agility</div>
-                  <p className="text-[11px] text-slate-600">
-                    Instantly update convocation storage folders, Google Sheets, and ceremony batch headers without touching code or redeploying on Render.
-                  </p>
-                </div>
-
-                <div className="bg-white/80 p-3 rounded-xl border border-amber-100 shadow-2xs">
-                  <div className="font-bold text-slate-900 mb-1">🛡️ Centralized Governance</div>
-                  <p className="text-[11px] text-slate-600">
-                    Provides a secure, unified administrative control pane to manage institutional academic parameters in one place.
-                  </p>
-                </div>
-
-                <div className="bg-white/80 p-3 rounded-xl border border-amber-100 shadow-2xs">
-                  <div className="font-bold text-slate-900 mb-1">🔒 Error Prevention & Audit</div>
-                  <p className="text-[11px] text-slate-600">
-                    Eliminates manual environment variable editing or typos by offering clean form inputs with instant validation.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 3: SYSTEM STATS & METRICS */}
+      {/* TAB 2: SYSTEM STATS & METRICS */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'system_stats' && (
         <div className="space-y-6">

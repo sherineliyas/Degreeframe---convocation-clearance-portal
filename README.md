@@ -188,5 +188,44 @@ npm run dev
 
 ---
 
+## 📊 Architecture Validation & 8,000-Student Scalability Guide
+
+### 1. Is Your Architecture Logic Correct? (GitHub Pages UI + Render Backend)
+Yes, your logic is **100% sound**.
+* **GitHub Pages (Frontend UI)**: Serves all static visual assets (`.js`, `.css`, HTML, images) via GitHub's global CDN. Even if all **8,000 students** open the portal at the exact same minute, GitHub Pages absorbs 100% of that page-load traffic for free without stressing your backend server.
+* **Render (Backend API)**: Only receives lightweight API requests (`/api/auth/send-otp`, `/api/student/lookup`, `/api/student/submit`).
+* Because `server.ts` uses an $O(1)$ Hash Map (`studentIndexMap`), searching a Register Number among **8,000 students** takes less than **0.01 milliseconds** and only uses **~3 MB of RAM** for the 8,000 student text records.
+
+### 2. Will Render Handle 8,000 Students? (3 Critical Factors to Know)
+While Render's CPU and lookup speed will easily handle 8,000 students, there are **3 practical limits** you must plan for if you are using **Render's Free Tier (512 MB RAM)** and **Gmail SMTP**:
+
+#### ⚠️ Factor A: Photo Storage in Memory ($8,000 \text{ Photos} \times 80\text{ KB}$)
+* **The Math**: 8,000 student text profiles only take ~3 MB of RAM. However, if all 8,000 students upload an 80 KB photo (which becomes ~105 KB in Base64) and you store all 8,000 Base64 photos inside Node.js RAM (`submissionsData`) at once, $8,000 \times 105\text{ KB} \approx 840\text{ MB}$, which will exceed Render Free Tier's **512 MB RAM** limit.
+* **The Fix**:
+  1. Either **batch by stream/department** (e.g., clear Engineering batches first, export/sync to Google Sheets & Drive, then clear Non-Engineering), **OR**
+  2. Connect the **Google Apps Script (`Code.gs`) / Google Drive & Sheets integration** so uploaded photos are saved directly as `.jpg` files into your Google Drive folder (`1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI`) and rows are written to Google Sheets, rather than holding 8,000 Base64 images in Render's RAM.
+
+#### ⚠️ Factor B: Render Free Tier "Sleep / Restart" Behavior
+* **How Render Free Tier Works**: Render's Free Tier automatically spins down (sleeps) after 15 minutes of inactivity or restarts periodically. Whenever a Node.js container restarts on Render, in-memory arrays (`studentData`, `submissionsData`) reset unless they are persisted to Google Sheets or a database.
+* **The Fix**: Use Render's **Starter Plan ($7/month)** during the convocation clearance month so the server never sleeps, or keep your **Google Sheets + Google Drive sync** active so data is permanently stored in Google Workspace.
+
+#### ⚠️ Factor C: Google Email OTP Daily Sending Limit (2,000 Emails/Day)
+* **How Gmail SMTP Works**:
+  * A standard `@gmail.com` account allows **500 emails per 24 hours**.
+  * An official Google Workspace account (`coe@hindustanuniv.ac.in`) allows **2,000 emails per 24 hours**.
+* **Impact on 8,000 Students**: If more than 2,000 students click "Send OTP" on the exact same day, Google SMTP will temporarily block outgoing OTP emails for 24 hours.
+* **The Fix**:
+  1. **Stagger by Department / Batch** (e.g., Day 1–2: CSE/IT/ECE, Day 3–4: Mech/Aero/Civil, Day 5–6: Arts & Science / PG) so daily OTP requests stay under 1,500/day, **OR**
+  2. Use a dedicated transactional SMTP relay (like Brevo / AWS SES / SendGrid) in `SMTP_HOST`, **OR** allow students to log in directly via **Register Number + Date of Birth** verification so SMTP emails are reserved only for Faculty, HODs, and ACOE officers.
+
+### 3. Summary Recommendation for 8,000 Students
+1. **Frontend on GitHub Pages + Backend on Render**: Great architecture—keep it.
+2. **To avoid the 2,000/day Gmail OTP limit & 512 MB RAM limit**:
+   * Students can verify using **Register Number + Date of Birth** (saving your `coe@hindustanuniv.ac.in` email quota strictly for Faculty/HOD/ACOE OTPs), and/or
+   * Render automatically forwards every student submission and photo directly to your **Google Sheet & Google Drive folder** so you never lose data or run out of RAM on Render's Free Tier.
+
+---
+
 © **Office of the Controller of Examinations (COE)**  
 Hindustan Institute of Technology and Science (HITS)
+

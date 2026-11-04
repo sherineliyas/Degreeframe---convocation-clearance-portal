@@ -46,7 +46,7 @@ DegreeFrame is built on a **3-Layer Cloud Architecture** designed so that heavy 
 * **Client-Side Image Processing (`src/utils/imageValidator.ts`)**: Before a photo ever leaves the student's browser, the frontend validates dimensions, crops to passport aspect ratio (`35mm × 40mm`), checks background brightness, and compresses the image into a lightweight JPEG (`< 80 KB`).
 
 #### 2. Backend (`server.ts` on Render)
-* **Official Email OTP Authentication**: Generates 6-digit time-bound OTPs (`5-minute expiry`) and dispatches them via `nodemailer` using the university's official SMTP account (`coe@hindustanuniv.ac.in`).
+* **Official Email OTP Authentication**: Generates 6-digit time-bound OTPs (`5-minute expiry`) and dispatches them via `nodemailer` using the university's official SMTP account (`dycoe@hindustanuniv.ac.in`).
 * **Automated Master Sheet Synchronization (`syncFromMasterSheet`)**: Automatically pulls student records from the `Student_data` tab, faculty roles from the `Faculty` tab, and submission statuses from the `Submissions` tab of the Master Google Sheet. The COE does **not** need to manually upload CSV files.
 * **$O(1)$ Memory Indexing**: Indexes all 8,000+ student text rows into a fast in-memory `Map` (`studentIndexMap`) so Register Number lookups complete in `< 0.001 ms`.
 * **Zero-RAM Photo Forwarding**: When a student submits their photo, `server.ts` forwards the Base64 payload to `Code.gs` and **immediately replaces the Base64 string in server RAM with the lightweight Google Drive URL** (`driveFileUrl`).
@@ -134,9 +134,9 @@ DegreeFrame is built on a **3-Layer Cloud Architecture** designed so that heavy 
    NODE_ENV=production
    SMTP_HOST=smtp.gmail.com
    SMTP_PORT=587
-   SMTP_USER=coe@hindustanuniv.ac.in
+   SMTP_USER=dycoe@hindustanuniv.ac.in
    SMTP_PASS=your_16_digit_google_app_password
-   FROM_EMAIL="Controller of Examinations <coe@hindustanuniv.ac.in>"
+   FROM_EMAIL="Controller of Examinations <dycoe@hindustanuniv.ac.in>"
    GAS_WEB_APP_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
    ```
 5. Click **Deploy Web Service**.
@@ -221,7 +221,7 @@ While Render's CPU and lookup speed will easily handle 8,000 students, there are
 ### 3. Summary Recommendation for 8,000 Students
 1. **Frontend on GitHub Pages + Backend on Render**: Great architecture—keep it.
 2. **To avoid the 2,000/day Gmail OTP limit & 512 MB RAM limit**:
-   * Students can verify using **Register Number + Date of Birth** (saving your `coe@hindustanuniv.ac.in` email quota strictly for Faculty/HOD/ACOE OTPs), and/or
+   * Students can verify using **Register Number + Date of Birth** (saving your `dycoe@hindustanuniv.ac.in` email quota strictly for Faculty/HOD/ACOE OTPs), and/or
    * Render automatically forwards every student submission and photo directly to your **Google Sheet & Google Drive folder** so you never lose data or run out of RAM on Render's Free Tier.
 
 ---

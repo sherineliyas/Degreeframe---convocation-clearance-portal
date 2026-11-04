@@ -407,9 +407,9 @@ git push -u origin main`}
                   <div className="bg-slate-900 text-emerald-300 p-3 rounded-xl font-mono text-[11px] ml-8 space-y-1">
                     <div>SMTP_HOST=smtp.gmail.com</div>
                     <div>SMTP_PORT=587</div>
-                    <div>SMTP_USER=coe@hindustanuniv.ac.in</div>
+                    <div>SMTP_USER=dycoe@hindustanuniv.ac.in</div>
                     <div>SMTP_PASS=(Your Gmail App Password)</div>
-                    <div>FROM_EMAIL=Controller of Examinations &lt;coe@hindustanuniv.ac.in&gt;</div>
+                    <div>FROM_EMAIL=Controller of Examinations &lt;dycoe@hindustanuniv.ac.in&gt;</div>
                   </div>
                 </div>
 

@@ -422,7 +422,7 @@ const otpCache: Record<string, { otp: string; expiresAt: number; role: string }>
 async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, portalRole: string): Promise<boolean> {
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
   const smtpPort = Number(process.env.SMTP_PORT) || 587;
-  const smtpUser = process.env.SMTP_USER || 'coe@hindustanuniv.ac.in';
+  const smtpUser = process.env.SMTP_USER || 'dycoe@hindustanuniv.ac.in';
   const smtpPass = process.env.SMTP_PASS;
   const fromAddress = process.env.FROM_EMAIL || `Controller of Examinations <${smtpUser}>`;
 

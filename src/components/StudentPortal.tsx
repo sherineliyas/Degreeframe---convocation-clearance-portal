@@ -180,7 +180,23 @@ export const StudentPortal: React.FC = () => {
     setAuthLoading(true);
     setAuthMessage(null);
     try {
-      const res = await api.sendOtp(email, 'student');
+      let targetEmail = email.toLowerCase().trim();
+      if (!targetEmail) {
+        setAuthMessage({ text: 'Please enter your student email or Register Number.', type: 'error' });
+        setAuthLoading(false);
+        return;
+      }
+      if (!targetEmail.includes('@')) {
+        targetEmail = targetEmail + '@student.hindustanuniv.ac.in';
+        setEmail(targetEmail);
+      }
+      if (!targetEmail.endsWith('@student.hindustanuniv.ac.in')) {
+        setAuthMessage({ text: 'Student email must be in the format @student.hindustanuniv.ac.in', type: 'error' });
+        setAuthLoading(false);
+        return;
+      }
+
+      const res = await api.sendOtp(targetEmail, 'student');
       if (res.success) {
         setOtpSent(true);
         setAuthMessage({ text: res.message || 'OTP sent successfully', type: 'success' });
@@ -492,21 +508,26 @@ export const StudentPortal: React.FC = () => {
             {/* Form */}
             <div className="mt-5 space-y-4">
               {!otpSent ? (
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="student@student.hindustanuniv.ac.in"
-                    className="flex-1 px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-slate-50/50"
-                  />
-                  <button
-                    onClick={handleSendOtp}
-                    disabled={authLoading || !email}
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    {authLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Send OTP'}
-                  </button>
+                <div className="space-y-1.5 text-left">
+                  <div className="flex flex-col sm:flex-row gap-2.5">
+                    <input
+                      type="text"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="e.g. 25sp2160026 or username@student.hindustanuniv.ac.in"
+                      className="flex-1 px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono bg-slate-50/50"
+                    />
+                    <button
+                      onClick={handleSendOtp}
+                      disabled={authLoading || !email}
+                      className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {authLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Send OTP'}
+                    </button>
+                  </div>
+                  <span className="text-[11px] text-slate-500 block pl-1">
+                    Format required: Must end with <strong className="text-blue-700">@student.hindustanuniv.ac.in</strong> (typing just your Register Number auto-appends domain).
+                  </span>
                 </div>
               ) : (
                 <div className="space-y-3">

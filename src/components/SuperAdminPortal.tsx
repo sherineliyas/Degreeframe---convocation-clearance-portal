@@ -138,7 +138,22 @@ export const SuperAdminPortal: React.FC = () => {
     setIsAddingAcoe(true);
     setNotification(null);
     try {
-        const res = await api.addAcoeUser({ email: acoeForm.email, name: acoeForm.name, otpEnabled: acoeForm.otpEnabled });
+        let targetEmail = acoeForm.email.toLowerCase().trim();
+        if (!targetEmail) {
+            setNotification({ type: 'error', message: 'Please enter ACOE email.' });
+            setIsAddingAcoe(false);
+            return;
+        }
+        if (!targetEmail.includes('@')) {
+            targetEmail = targetEmail + '@hindustanuniv.ac.in';
+        }
+        if (!targetEmail.endsWith('@hindustanuniv.ac.in')) {
+            setNotification({ type: 'error', message: 'ACOE email must end in @hindustanuniv.ac.in' });
+            setIsAddingAcoe(false);
+            return;
+        }
+
+        const res = await api.addAcoeUser({ email: targetEmail, name: acoeForm.name, otpEnabled: acoeForm.otpEnabled });
         if (res.success) {
             setNotification({ type: 'success', message: 'ACOE User added successfully.' });
             setAcoeForm({ email: '', name: '', otpEnabled: true });

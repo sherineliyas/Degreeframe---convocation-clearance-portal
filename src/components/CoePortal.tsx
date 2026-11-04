@@ -214,8 +214,17 @@ export const CoePortal: React.FC = () => {
     setAuthError('');
     setAuthSuccess('');
 
-    if (!adminEmail.trim()) {
+    let targetEmail = adminEmail.toLowerCase().trim();
+    if (!targetEmail) {
       setAuthError('Please enter authorized COE administrative email.');
+      return;
+    }
+    if (!targetEmail.includes('@') && targetEmail !== 'superadmin') {
+      targetEmail = targetEmail + '@hindustanuniv.ac.in';
+      setAdminEmail(targetEmail);
+    }
+    if (!targetEmail.endsWith('@hindustanuniv.ac.in') && targetEmail !== 'superadmin') {
+      setAuthError('Official COE email must end in @hindustanuniv.ac.in');
       return;
     }
 
@@ -245,8 +254,17 @@ export const CoePortal: React.FC = () => {
     setAuthError('');
     setAuthSuccess('');
 
-    if (!adminEmail.trim()) {
+    let targetEmail = adminEmail.toLowerCase().trim();
+    if (!targetEmail) {
       setAuthError('Please enter authorized COE administrative email.');
+      return;
+    }
+    if (!targetEmail.includes('@') && targetEmail !== 'superadmin') {
+      targetEmail = targetEmail + '@hindustanuniv.ac.in';
+      setAdminEmail(targetEmail);
+    }
+    if (!targetEmail.endsWith('@hindustanuniv.ac.in') && targetEmail !== 'superadmin') {
+      setAuthError('Official COE email must end in @hindustanuniv.ac.in');
       return;
     }
 

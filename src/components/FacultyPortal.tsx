@@ -63,7 +63,23 @@ export const FacultyPortal: React.FC = () => {
     setAuthLoading(true);
     setAuthMessage(null);
     try {
-      const res = await api.sendOtp(email, 'faculty');
+      let targetEmail = email.toLowerCase().trim();
+      if (!targetEmail) {
+        setAuthMessage({ text: 'Please enter your institutional email.', type: 'error' });
+        setAuthLoading(false);
+        return;
+      }
+      if (!targetEmail.includes('@')) {
+        targetEmail = targetEmail + '@hindustanuniv.ac.in';
+        setEmail(targetEmail);
+      }
+      if (!targetEmail.endsWith('@hindustanuniv.ac.in')) {
+        setAuthMessage({ text: 'Official faculty email must end in @hindustanuniv.ac.in', type: 'error' });
+        setAuthLoading(false);
+        return;
+      }
+
+      const res = await api.sendOtp(targetEmail, 'faculty');
       if (res.success) {
         setOtpSent(true);
         setAuthMessage({ text: res.message || 'OTP sent to official faculty email', type: 'success' });

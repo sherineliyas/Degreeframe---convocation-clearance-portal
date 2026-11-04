@@ -77,6 +77,7 @@ export interface CoeSettings {
   spreadsheetId: string;
   driveFolderUrl: string;
   driveFolderId: string;
+  scriptUrl?: string;
   academicYear: string;
   convocationBatch: string;
 }

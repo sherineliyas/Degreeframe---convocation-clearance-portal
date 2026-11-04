@@ -125,6 +125,7 @@ export const CoePortal: React.FC = () => {
   // Form: Drive Config
   const [driveUrlInput, setDriveUrlInput] = useState('');
   const [sheetUrlInput, setSheetUrlInput] = useState('');
+  const [scriptUrlInput, setScriptUrlInput] = useState('');
   const [batchInput, setBatchInput] = useState('');
   const [yearInput, setYearInput] = useState('');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
@@ -160,6 +161,7 @@ export const CoePortal: React.FC = () => {
           setSettings(res.settings);
           setDriveUrlInput(res.settings.driveFolderUrl);
           setSheetUrlInput(res.settings.spreadsheetUrl);
+          setScriptUrlInput(res.settings.scriptUrl || '');
           setBatchInput(res.settings.convocationBatch);
           setYearInput(res.settings.academicYear);
         }
@@ -409,6 +411,7 @@ export const CoePortal: React.FC = () => {
       const res = await api.updateCoeConfig({
         driveFolderUrl: driveUrlInput.trim(),
         spreadsheetUrl: sheetUrlInput.trim(),
+        scriptUrl: scriptUrlInput.trim(),
         convocationBatch: batchInput.trim(),
         academicYear: yearInput.trim(),
       });
@@ -1134,6 +1137,22 @@ export const CoePortal: React.FC = () => {
               />
               <p className="text-[11px] text-slate-400 mt-1">
                 Make sure the Google Drive folder permissions are set to allow write access for the university service account or drive owner.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Google Apps Script Web App URL <span className="text-slate-400 font-normal">(Optional — Leave blank if set via Render GOOGLE_SCRIPT_URL)</span>
+              </label>
+              <input
+                type="text"
+                value={scriptUrlInput}
+                onChange={(e) => setScriptUrlInput(e.target.value)}
+                placeholder="Optional: https://script.google.com/macros/s/AKfycb.../exec"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Optional override. Deploying <code className="text-purple-700">Code.gs</code> is done only once—changing the Google Drive Folder URL above automatically routes new <code className="text-purple-700">&lt;RegNo&gt;.jpg</code> uploads to the new Drive folder without redeploying Apps Script.
               </p>
             </div>
 

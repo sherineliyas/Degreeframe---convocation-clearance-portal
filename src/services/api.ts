@@ -20,6 +20,21 @@ export interface ApiResponse<T = any> {
 // In-memory OTP storage for backup validation if network delay occurs
 const simulatedOtps: Record<string, { otp: string; expiresAt: number; portalType: string }> = {};
 
+// Resolves API endpoint URL: uses VITE_API_BASE_URL (or configured Render URL) when UI is hosted on GitHub Pages,
+// or relative '/api/...' when UI and backend are hosted together on Render.
+function apiUrl(path: string): string {
+  const envBase = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (envBase) {
+    return `${envBase}${path}`;
+  }
+  const cfg = storage.getConfig();
+  if (cfg.scriptUrl && !cfg.scriptUrl.includes('script.google.com')) {
+    const cleanBase = cfg.scriptUrl.trim().replace(/\/+$/, '');
+    return `${cleanBase}${path}`;
+  }
+  return path;
+}
+
 export const api = {
   // 1. Send OTP
   async sendOtp(email: string, portalType: 'student' | 'faculty' | 'coe'): Promise<ApiResponse> {
@@ -58,7 +73,7 @@ export const api = {
 
     // Try Express backend first
     try {
-      const response = await fetch('/api/auth/send-otp', {
+      const response = await fetch(apiUrl('/api/auth/send-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail, portalType }),
@@ -111,7 +126,7 @@ export const api = {
 
     // Try Express backend first
     try {
-      const response = await fetch('/api/auth/verify-otp', {
+      const response = await fetch(apiUrl('/api/auth/verify-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -201,7 +216,7 @@ export const api = {
 
     // Try Express backend first
     try {
-      const response = await fetch(`/api/student/lookup/${encodeURIComponent(cleanRegNo)}`);
+      const response = await fetch(apiUrl(`/api/student/lookup/${encodeURIComponent(cleanRegNo)}`));
       if (response.ok) {
         const res = await response.json();
         if (res.success) return res;
@@ -258,7 +273,7 @@ export const api = {
   async submitApplication(payload: any): Promise<ApiResponse> {
     // Try Express backend first
     try {
-      const response = await fetch('/api/student/submit', {
+      const response = await fetch(apiUrl('/api/student/submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -337,7 +352,7 @@ export const api = {
 
     // Try Express backend first
     try {
-      const response = await fetch(`/api/student/status/${encodeURIComponent(cleanQuery)}`);
+      const response = await fetch(apiUrl(`/api/student/status/${encodeURIComponent(cleanQuery)}`));
       if (response.ok) {
         const res = await response.json();
         if (res.success) return res;
@@ -400,7 +415,7 @@ export const api = {
 
     // Try Express backend first
     try {
-      const response = await fetch(`/api/faculty/pending?email=${encodeURIComponent(cleanEmail)}`);
+      const response = await fetch(apiUrl(`/api/faculty/pending?email=${encodeURIComponent(cleanEmail)}`));
       if (response.ok) {
         const res = await response.json();
         if (res.success && Array.isArray(res.data)) return res;
@@ -440,7 +455,7 @@ export const api = {
   }): Promise<ApiResponse> {
     // Try Express backend first
     try {
-      const response = await fetch('/api/faculty/action', {
+      const response = await fetch(apiUrl('/api/faculty/action'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -490,7 +505,7 @@ export const api = {
   }): Promise<ApiResponse> {
     // Try Express backend first
     try {
-      const response = await fetch('/api/faculty/add-teacher', {
+      const response = await fetch(apiUrl('/api/faculty/add-teacher'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -535,7 +550,7 @@ export const api = {
   async getCoeOverview(streamScope?: string): Promise<ApiResponse> {
     try {
       const url = streamScope ? `/api/coe/overview?streamScope=${encodeURIComponent(streamScope)}` : '/api/coe/overview';
-      const response = await fetch(url);
+      const response = await fetch(apiUrl(url));
       if (response.ok) {
         const res = await response.json();
         return res;
@@ -575,7 +590,7 @@ export const api = {
   // COE Login with Username or Email, and Password or OTP
   async coeLogin(usernameOrEmail: string, password?: string, otp?: string): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/auth/coe-login', {
+      const response = await fetch(apiUrl('/api/auth/coe-login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usernameOrEmail, email: usernameOrEmail, password, otp }),
@@ -608,7 +623,7 @@ export const api = {
   // Get list of registered ACOE Users (Super Admin only)
   async getCoeUsers(): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/users');
+      const response = await fetch(apiUrl('/api/coe/users'));
       if (response.ok) {
         return await response.json();
       }
@@ -627,7 +642,7 @@ export const api = {
   // Add or Appoint new ACOE Administrator
   async addAcoeUser(payload: { email: string; name: string; password?: string; role?: string; streamScope?: string; otpEnabled?: boolean }): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/add-acoe', {
+      const response = await fetch(apiUrl('/api/coe/add-acoe'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -645,7 +660,7 @@ export const api = {
   // Toggle Email OTP Alone Any Time (Super Admin Action)
   async toggleAcoeOtp(email: string, otpEnabled: boolean): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/toggle-otp', {
+      const response = await fetch(apiUrl('/api/coe/toggle-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otpEnabled }),
@@ -662,7 +677,7 @@ export const api = {
   // Update ACOE Email or Name
   async updateAcoeUser(payload: { oldEmail: string; newEmail?: string; name?: string; otpEnabled?: boolean }): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/update-acoe', {
+      const response = await fetch(apiUrl('/api/coe/update-acoe'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -679,7 +694,7 @@ export const api = {
   // Delete / Remove ACOE User Email
   async deleteAcoeUser(email: string): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/delete-acoe', {
+      const response = await fetch(apiUrl('/api/coe/delete-acoe'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -696,7 +711,7 @@ export const api = {
   // Change COE Password
   async changeCoePassword(identifier: string, newPassword: string): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/change-password', {
+      const response = await fetch(apiUrl('/api/coe/change-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: identifier, username: identifier, newPassword }),
@@ -715,7 +730,7 @@ export const api = {
   // Update COE Drive & Spreadsheet Config
   async updateCoeConfig(payload: Partial<CoeSettings>): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/config', {
+      const response = await fetch(apiUrl('/api/coe/config'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -737,6 +752,9 @@ export const api = {
       const match = payload.spreadsheetUrl.match(/[-\w]{25,}/);
       if (match) cfg.spreadsheetId = match[0];
     }
+    if (typeof payload.scriptUrl === 'string') {
+      cfg.scriptUrl = payload.scriptUrl.trim();
+    }
     storage.saveConfig(cfg);
 
     return {
@@ -748,7 +766,7 @@ export const api = {
   // COE Add Department HOD
   async addHod(payload: { email: string; name: string; department: string; specialization?: string }): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/add-hod', {
+      const response = await fetch(apiUrl('/api/coe/add-hod'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -793,7 +811,7 @@ export const api = {
   // COE Import Sheets
   async importSheets(payload: { students?: any[]; submissions?: any[]; faculty?: any[] }): Promise<ApiResponse> {
     try {
-      const response = await fetch('/api/coe/import-sheets', {
+      const response = await fetch(apiUrl('/api/coe/import-sheets'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

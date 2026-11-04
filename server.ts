@@ -10,6 +10,17 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+// Enable CORS so GitHub Pages (https://sherineliyas.github.io) can call this Render backend
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Enable JSON body parsing up to 50MB for photos and documents
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -69,6 +80,7 @@ interface CoeSettings {
   spreadsheetId: string;
   driveFolderUrl: string;
   driveFolderId: string;
+  scriptUrl?: string;
   academicYear: string;
   convocationBatch: string;
 }
@@ -140,9 +152,37 @@ let coeSettings: CoeSettings = {
   spreadsheetId: '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ',
   driveFolderUrl: 'https://drive.google.com/drive/folders/1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
   driveFolderId: '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
+  scriptUrl: process.env.GOOGLE_SCRIPT_URL || '',
   academicYear: '2024-2025',
   convocationBatch: '34th Convocation Ceremony',
 };
+
+// Helper to forward actions to Google Apps Script (Code.gs) for Google Drive .jpg creation & Google Sheets persistence
+async function callGoogleAppsScript(action: string, payload: Record<string, any>): Promise<any | null> {
+  const targetScriptUrl = (coeSettings.scriptUrl || process.env.GOOGLE_SCRIPT_URL || '').trim();
+  if (!targetScriptUrl || !targetScriptUrl.startsWith('http')) {
+    return null;
+  }
+  try {
+    const response = await fetch(targetScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action,
+        parentFolderId: coeSettings.driveFolderId,
+        spreadsheetId: coeSettings.spreadsheetId,
+        ...payload,
+      }),
+      redirect: 'follow',
+    });
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch (err: any) {
+    console.warn(`[GAS-SYNC] Failed calling action '${action}' on Google Apps Script:`, err?.message || err);
+  }
+  return null;
+}
 
 // Simulated OTP storage
 const otpCache: Record<string, { otp: string; expiresAt: number; role: string }> = {};
@@ -637,7 +677,7 @@ app.post('/api/coe/change-password', (req: Request, res: Response) => {
 
 // Update Google Drive folder & Spreadsheet Settings
 app.post('/api/coe/config', (req: Request, res: Response) => {
-  const { spreadsheetUrl, driveFolderUrl, academicYear, convocationBatch } = req.body;
+  const { spreadsheetUrl, driveFolderUrl, scriptUrl, academicYear, convocationBatch } = req.body;
 
   if (spreadsheetUrl) {
     coeSettings.spreadsheetUrl = spreadsheetUrl;
@@ -651,12 +691,18 @@ app.post('/api/coe/config', (req: Request, res: Response) => {
     if (match) coeSettings.driveFolderId = match[0];
   }
 
+  if (typeof scriptUrl === 'string' && scriptUrl.trim()) {
+    coeSettings.scriptUrl = scriptUrl.trim();
+  } else if (!coeSettings.scriptUrl && process.env.GOOGLE_SCRIPT_URL) {
+    coeSettings.scriptUrl = process.env.GOOGLE_SCRIPT_URL;
+  }
+
   if (academicYear) coeSettings.academicYear = academicYear;
   if (convocationBatch) coeSettings.convocationBatch = convocationBatch;
 
   return res.json({
     success: true,
-    message: 'COE Google Drive storage folder & Spreadsheet configuration updated.',
+    message: 'COE Google Drive storage folder, Apps Script URL & Spreadsheet configuration updated.',
     settings: coeSettings,
   });
 });
@@ -754,7 +800,7 @@ app.post('/api/coe/import-sheets', (req: Request, res: Response) => {
 // ==========================================
 
 // Lookup student data by Register Number
-app.get('/api/student/lookup/:regNo', (req: Request, res: Response) => {
+app.get('/api/student/lookup/:regNo', async (req: Request, res: Response) => {
   const queryReg = req.params.regNo.trim().toUpperCase();
 
   // 1. Check Submissions tab first
@@ -776,23 +822,29 @@ app.get('/api/student/lookup/:regNo', (req: Request, res: Response) => {
 
   // 2. Fast O(1) Lookup in Student_data Hash Map
   const student = studentIndexMap.get(queryReg) || studentData.find((s) => s.registerNumber.toUpperCase() === queryReg);
-  if (!student) {
-    return res.status(404).json({
-      success: false,
-      message: `Register Number '${req.params.regNo}' not found in official student database sheet.`,
+  if (student) {
+    return res.json({
+      success: true,
+      alreadySubmitted: false,
+      data: student,
     });
   }
 
-  return res.json({
-    success: true,
-    alreadySubmitted: false,
-    data: student,
+  // 3. Fallback to Google Apps Script (Student_data & Submissions sheet) if configured
+  const gasLookup = await callGoogleAppsScript('getStudentData', { registerNumber: queryReg });
+  if (gasLookup && gasLookup.success) {
+    return res.json(gasLookup);
+  }
+
+  return res.status(404).json({
+    success: false,
+    message: `Register Number '${req.params.regNo}' not found in official student database sheet.`,
   });
 });
 
 
 // Student Submit Application
-app.post('/api/student/submit', (req: Request, res: Response) => {
+app.post('/api/student/submit', async (req: Request, res: Response) => {
   const {
     registerNumber,
     studentEmail,
@@ -808,7 +860,9 @@ app.post('/api/student/submit', (req: Request, res: Response) => {
     batch,
     photoData,
     proof10thData,
+    proof10thMime,
     proofTcData,
+    proofTcMime,
     isNameCorrected,
     isFatherCorrected,
     isGenderCorrected,
@@ -825,10 +879,11 @@ app.post('/api/student/submit', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Passport photograph is required.' });
   }
 
+  const rawPhotoBase64 = photoData.includes('base64,') ? photoData.split('base64,')[1] : photoData;
+
   // Check photo size limit (< 80KB)
   try {
-    const base64Content = photoData.includes('base64,') ? photoData.split('base64,')[1] : photoData;
-    const buffer = Buffer.from(base64Content, 'base64');
+    const buffer = Buffer.from(rawPhotoBase64, 'base64');
     if (buffer.length > 80 * 1024) {
       return res.status(400).json({
         success: false,
@@ -851,7 +906,49 @@ app.post('/api/student/submit', (req: Request, res: Response) => {
       ? 'Requested Corrections: ' + corrections.join(', ')
       : 'Verified profile details without edits.';
 
-  const submissionId = 'sub-' + Math.random().toString(36).substring(2, 8);
+  let submissionId = 'sub-' + Math.random().toString(36).substring(2, 8);
+  let savedDrivePhotoUrl = photoData;
+  let savedProof10thUrl = proof10thData || '';
+  let savedProofTcUrl = proofTcData || '';
+
+  // Forward to Google Apps Script (Code.gs) to save .jpg in Google Drive folder & row in Google Sheet
+  const gasResult = await callGoogleAppsScript('submitStudentApplication', {
+    registerNumber: regNo,
+    studentEmail: String(studentEmail || '').trim().toLowerCase(),
+    studentName: String(studentName || '').trim(),
+    fatherName: String(fatherName || '').trim(),
+    gender: String(gender || 'MALE').trim(),
+    dob: String(dob || '').trim(),
+    nationality: String(nationality || 'INDIAN').trim(),
+    department: String(department || '').trim().toUpperCase(),
+    specialization: String(specialization || 'GENERAL').trim().toUpperCase(),
+    semester: String(semester || 'VIII').trim().toUpperCase(),
+    section: String(section || 'A').trim().toUpperCase(),
+    batch: String(batch || 'Batch A').trim(),
+    photoData: rawPhotoBase64,
+    proof10thData: proof10thData && proof10thData.includes('base64,') ? proof10thData.split('base64,')[1] : (proof10thData || ''),
+    proof10thMime: proof10thMime || 'application/pdf',
+    proofTcData: proofTcData && proofTcData.includes('base64,') ? proofTcData.split('base64,')[1] : (proofTcData || ''),
+    proofTcMime: proofTcMime || 'application/pdf',
+    isNameCorrected: Boolean(isNameCorrected),
+    isFatherCorrected: Boolean(isFatherCorrected),
+    isGenderCorrected: Boolean(isGenderCorrected),
+    isDobCorrected: Boolean(isDobCorrected),
+    isNationalityCorrected: Boolean(isNationalityCorrected),
+  });
+
+  if (gasResult) {
+    if (!gasResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: gasResult.message || 'Google Drive / Sheet submission failed.',
+      });
+    }
+    if (gasResult.trackingId) submissionId = gasResult.trackingId;
+    if (gasResult.driveUrl) savedDrivePhotoUrl = gasResult.driveUrl;
+    if (gasResult.proof10thUrl !== undefined) savedProof10thUrl = gasResult.proof10thUrl;
+    if (gasResult.proofTcUrl !== undefined) savedProofTcUrl = gasResult.proofTcUrl;
+  }
 
   const newSubmission: SubmissionRecord = {
     submissionId,
@@ -868,9 +965,9 @@ app.post('/api/student/submit', (req: Request, res: Response) => {
     section: String(section || 'A').trim().toUpperCase(),
     batch: String(batch || 'Batch A').trim(),
     photoUpload: `${regNo}.jpg`,
-    finalDriveUrl: photoData, // Saved to COE target Drive folder hierarchy Photo/Dept/Spec/Sec
-    proof10thUrl: proof10thData || '',
-    proofTcUrl: proofTcData || '',
+    finalDriveUrl: savedDrivePhotoUrl,
+    proof10thUrl: savedProof10thUrl,
+    proofTcUrl: savedProofTcUrl,
     validationNotes,
     approvalStatus: 'PENDING_TEACHER',
     submittedAt: new Date().toISOString(),
@@ -889,13 +986,16 @@ app.post('/api/student/submit', (req: Request, res: Response) => {
   return res.json({
     success: true,
     trackingId: submissionId,
-    message: 'Application recorded and forwarded to Department Class Teacher for review.',
+    driveUrl: savedDrivePhotoUrl,
+    message: gasResult?.success
+      ? `Photo saved as ${regNo}.jpg to Google Drive & recorded in Submissions Sheet for Teacher Review.`
+      : 'Application recorded and forwarded to Department Class Teacher for review.',
     driveFolder: coeSettings.driveFolderUrl,
   });
 });
 
 // Check Submission Status
-app.get('/api/student/status/:query', (req: Request, res: Response) => {
+app.get('/api/student/status/:query', async (req: Request, res: Response) => {
   const query = req.params.query.trim().toLowerCase();
 
   const found = submissionsData.find(
@@ -905,16 +1005,22 @@ app.get('/api/student/status/:query', (req: Request, res: Response) => {
       s.submissionId.toLowerCase() === query
   );
 
-  if (!found) {
-    return res.status(404).json({
-      success: false,
-      message: `No submission record found for '${req.params.query}'.`,
+  if (found) {
+    return res.json({
+      success: true,
+      data: found,
     });
   }
 
-  return res.json({
-    success: true,
-    data: found,
+  // Fallback to Google Apps Script (Submissions sheet) if configured
+  const gasStatus = await callGoogleAppsScript('checkSubmissionStatus', { query });
+  if (gasStatus && gasStatus.success) {
+    return res.json(gasStatus);
+  }
+
+  return res.status(404).json({
+    success: false,
+    message: `No submission record found for '${req.params.query}'.`,
   });
 });
 
@@ -972,12 +1078,23 @@ app.all('/api/faculty/pending', (req: Request, res: Response) => {
 });
 
 // Process Teacher / HOD Approval / Rejection
-app.post('/api/faculty/action', (req: Request, res: Response) => {
+app.post('/api/faculty/action', async (req: Request, res: Response) => {
   const { submissionId, decision, remarks, role } = req.body;
+
+  // Also sync approval/rejection with Google Apps Script Submissions sheet if configured
+  await callGoogleAppsScript('processFacultyAction', {
+    submissionId,
+    decision,
+    remarks,
+    role,
+  });
 
   const sub = submissionsData.find((s) => s.submissionId === submissionId);
   if (!sub) {
-    return res.status(404).json({ success: false, message: 'Submission record not found.' });
+    return res.json({
+      success: true,
+      message: `Application updated in Google Sheet (${decision}).`,
+    });
   }
 
   const isApproved = decision === 'APPROVE';
@@ -1000,7 +1117,7 @@ app.post('/api/faculty/action', (req: Request, res: Response) => {
 });
 
 // HOD Assign Class Teacher
-app.post('/api/faculty/add-teacher', (req: Request, res: Response) => {
+app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
   const { hodEmail, teacherEmail, teacherName, department, specialization, semester, batch, section } = req.body;
 
   const hod = facultyData.find((f) => f.email.toLowerCase() === String(hodEmail).toLowerCase() && f.role === 'HOD');
@@ -1020,6 +1137,17 @@ app.post('/api/faculty/add-teacher', (req: Request, res: Response) => {
   };
 
   facultyData.push(newTeacher);
+
+  // Sync to Google Apps Script Faculty sheet if configured
+  await callGoogleAppsScript('addClassTeacher', {
+    hodEmail,
+    teacherEmail: newTeacher.email,
+    teacherName: newTeacher.name,
+    department: newTeacher.department,
+    specialization: newTeacher.specialization,
+    section: newTeacher.section,
+    batch: newTeacher.batch,
+  });
 
   return res.json({
     success: true,

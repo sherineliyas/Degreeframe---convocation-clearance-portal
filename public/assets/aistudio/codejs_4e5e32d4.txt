@@ -1,8 +1,8 @@
 // ==========================================
-// CONFIGURATION
+// CONFIGURATION (Defaults — dynamically overridden when updated in COE Portal)
 // ==========================================
-const PARENT_FOLDER_ID = "1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI"; 
-const SPREADSHEET_ID = "1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ"; 
+let PARENT_FOLDER_ID = "1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI"; 
+let SPREADSHEET_ID = "1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ"; 
 
 // ==========================================
 // REST API ROUTER
@@ -22,6 +22,12 @@ function doPost(e) {
     }
 
     const payload = JSON.parse(e.postData.contents);
+    if (payload.parentFolderId && String(payload.parentFolderId).trim()) {
+      PARENT_FOLDER_ID = String(payload.parentFolderId).trim();
+    }
+    if (payload.spreadsheetId && String(payload.spreadsheetId).trim()) {
+      SPREADSHEET_ID = String(payload.spreadsheetId).trim();
+    }
     const action = payload.action;
 
     let responseData = { success: false, message: "Invalid action requested." };
@@ -253,7 +259,10 @@ function validateStudentPayload(formObject) {
   }
 
   try {
-    const photoBytes = Utilities.base64Decode(formObject.photoFile.data);
+    const rawPhotoBase64 = String(formObject.photoFile.data).includes("base64,")
+      ? String(formObject.photoFile.data).split("base64,")[1]
+      : String(formObject.photoFile.data);
+    const photoBytes = Utilities.base64Decode(rawPhotoBase64);
     if (photoBytes.length > 80 * 1024) {
       return { valid: false, message: `Passport photo exceeds 80KB limit (${(photoBytes.length / 1024).toFixed(1)}KB).` };
     }
@@ -418,7 +427,10 @@ function processStudentSubmission(formObject) {
       existingOldPhotos.next().setTrashed(true);
     }
 
-    const photoBytes = Utilities.base64Decode(formObject.photoFile.data);
+    const rawPhotoBase64 = String(formObject.photoFile.data).includes("base64,")
+      ? String(formObject.photoFile.data).split("base64,")[1]
+      : String(formObject.photoFile.data);
+    const photoBytes = Utilities.base64Decode(rawPhotoBase64);
     const photoBlob = Utilities.newBlob(photoBytes, 'image/jpeg', `${regNo}.jpg`);
     const savedPhoto = photoTargetFolder.createFile(photoBlob);
 
@@ -435,7 +447,10 @@ function processStudentSubmission(formObject) {
 
     let proof10thUrl = "";
     if (formObject.proof10thFile && formObject.proof10thFile.data) {
-      const p10Bytes = Utilities.base64Decode(formObject.proof10thFile.data);
+      const raw10thBase64 = String(formObject.proof10thFile.data).includes("base64,")
+        ? String(formObject.proof10thFile.data).split("base64,")[1]
+        : String(formObject.proof10thFile.data);
+      const p10Bytes = Utilities.base64Decode(raw10thBase64);
       const isPdf = (formObject.proof10thFile.mimeType === "application/pdf");
       const ext = isPdf ? "pdf" : "jpg";
       const p10FileName = `${regNo}_10th_Certicate.${ext}`;
@@ -450,7 +465,10 @@ function processStudentSubmission(formObject) {
 
     let proofTcUrl = "";
     if (formObject.proofTcFile && formObject.proofTcFile.data) {
-      const tcBytes = Utilities.base64Decode(formObject.proofTcFile.data);
+      const rawTcBase64 = String(formObject.proofTcFile.data).includes("base64,")
+        ? String(formObject.proofTcFile.data).split("base64,")[1]
+        : String(formObject.proofTcFile.data);
+      const tcBytes = Utilities.base64Decode(rawTcBase64);
       const isPdf = (formObject.proofTcFile.mimeType === "application/pdf");
       const ext = isPdf ? "pdf" : "jpg";
       const tcFileName = `${regNo}_TC_Certicate.${ext}`;
@@ -501,6 +519,9 @@ function processStudentSubmission(formObject) {
     return { 
       success: true, 
       trackingId: submissionId,
+      driveUrl: savedPhoto.getUrl(),
+      proof10thUrl: proof10thUrl,
+      proofTcUrl: proofTcUrl,
       message: "Profile details verified and saved! Photo & Proof documents submitted for Teacher Review." 
     };
 

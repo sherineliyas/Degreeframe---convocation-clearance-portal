@@ -553,7 +553,7 @@ export const StudentPortal: React.FC = () => {
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Student Portal Login</h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
-              Enter your official university email (<code className="text-blue-600 font-semibold">@student.hindustanuniv.ac.in</code>) or registered Gmail to receive a verification OTP.
+              Enter your official university email (<code className="text-blue-600 font-semibold">@student.hindustanuniv.ac.in</code>) to receive a verification OTP.
             </p>
 
             {/* User Guide Card for Students */}

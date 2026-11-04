@@ -173,23 +173,9 @@ export const api = {
       }
     }
 
-    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
-      try {
-        const response = await fetch(config.scriptUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'sendOtp', email: cleanEmail, otp, portalType }),
-        });
-        const res = await response.json();
-        return res;
-      } catch (e: any) {
-        console.warn('Network call failed, using fallback:', e);
-      }
-    }
-
     return {
       success: true,
-      message: `OTP sent to ${cleanEmail}. Please check your inbox.`,
+      message: `OTP generated for ${cleanEmail}. Please check your email inbox.`,
     };
   },
 

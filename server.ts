@@ -428,15 +428,8 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
 
   console.log(`[AUTH-OTP] Generated OTP for ${recipientEmail} [Role: ${portalRole}]: ${otpCode}`);
 
-  // 1. Always attempt HTTPS dispatch via Google Apps Script (Code.gs) if configured (never blocked by Render firewall)
-  callGoogleAppsScript('sendOtp', {
-    email: recipientEmail,
-    otp: otpCode,
-    portalType: portalRole,
-  }).catch(() => {});
-
   if (!smtpPass) {
-    console.log(`[SMTP-INFO] No SMTP_PASS specified. Real SMTP dispatch skipped for ${recipientEmail}.`);
+    console.log(`[SMTP-INFO] No SMTP_PASS specified on server. Generated OTP for ${recipientEmail}: ${otpCode}`);
     return false;
   }
 

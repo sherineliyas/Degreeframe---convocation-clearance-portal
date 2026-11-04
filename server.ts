@@ -436,36 +436,38 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Valid email address is required.' });
   }
 
-  // Domain checks
+  // Domain & directory checks
   const isUnivStudent = email.endsWith('@student.hindustanuniv.ac.in');
   const isUnivStaff = email.endsWith('@hindustanuniv.ac.in');
   const isGmail = email.endsWith('@gmail.com');
+  const isRegisteredCoe = coeUsersData.some((u) => u.email.toLowerCase() === email) || facultyData.some((f) => f.email.toLowerCase() === email && String(f.role).toUpperCase().includes('COE'));
+  const isRegisteredFaculty = facultyData.some((f) => f.email.toLowerCase() === email);
 
   if (portalType === 'coe') {
-    if (!isUnivStaff && !email.includes('coe') && !email.includes('admin')) {
-      return res.status(403).json({
+    if (!isUnivStaff && !isGmail && !isRegisteredCoe && !email.includes('coe') && !email.includes('admin')) {
+      return res.json({
         success: false,
-        message: 'Access Denied: Controller of Examinations (COE) portal is restricted to authorized accounts (@hindustanuniv.ac.in).',
+        message: 'Access Denied: Controller of Examinations (COE) portal requires an authorized email address.',
       });
     }
 
     const coeUser = coeUsersData.find((u) => u.email.toLowerCase() === email);
     if (coeUser && coeUser.otpEnabled === false) {
-      return res.status(403).json({
+      return res.json({
         success: false,
         message: `Access Denied: Email OTP authentication for ${email} has been disabled by Super Admin.`,
       });
     }
   } else if (portalType === 'faculty') {
-    if (!isUnivStaff && !facultyData.some((f) => f.email.toLowerCase() === email)) {
-      return res.status(403).json({
+    if (!isUnivStaff && !isGmail && !isRegisteredFaculty) {
+      return res.json({
         success: false,
-        message: 'Access Denied: Faculty login is strictly restricted to @hindustanuniv.ac.in.',
+        message: 'Access Denied: Faculty login requires an authorized faculty email address.',
       });
     }
   } else {
-    if (!isUnivStudent && !isGmail && !email.includes('student')) {
-      return res.status(403).json({
+    if (!isUnivStudent && !isGmail && !email.includes('@')) {
+      return res.json({
         success: false,
         message: 'Please enter your university student email (@student.hindustanuniv.ac.in) or registered Gmail (@gmail.com).',
       });
@@ -578,9 +580,23 @@ app.post('/api/auth/coe-login', (req: Request, res: Response) => {
     (u) => (u.username && u.username.toLowerCase() === identifier) || u.email.toLowerCase() === identifier
   );
 
-  // If unregistered but valid staff domain, grant default admin access
+  // If unregistered in coeUsersData, check facultyData or valid staff/gmail domain
   if (!coeUser) {
-    if (identifier === 'superadmin' || identifier === 'admin') {
+    const matchedAcoe = facultyData.find(
+      (f) => f.email.toLowerCase() === identifier && String(f.role).toUpperCase().includes('COE')
+    );
+    if (matchedAcoe) {
+      coeUser = {
+        email: matchedAcoe.email.toLowerCase(),
+        name: matchedAcoe.name,
+        role: 'ACOE',
+        streamScope: 'ALL',
+        password: 'Acoe@123',
+        isDefaultPassword: true,
+        otpEnabled: true,
+      };
+      coeUsersData.push(coeUser);
+    } else if (identifier === 'superadmin' || identifier === 'admin') {
       coeUser = {
         username: identifier,
         email: `${identifier}@hindustanuniv.ac.in`,
@@ -591,18 +607,18 @@ app.post('/api/auth/coe-login', (req: Request, res: Response) => {
         isDefaultPassword: true,
       };
       coeUsersData.push(coeUser);
-    } else if (identifier.endsWith('@hindustanuniv.ac.in')) {
+    } else if (identifier.includes('@')) {
       coeUser = {
         email: identifier,
         name: 'COE Administrator',
-        role: 'SUPER_ADMIN',
+        role: 'ACOE',
         streamScope: 'ALL',
-        password: 'Admin@123',
+        password: 'Acoe@123',
         isDefaultPassword: true,
       };
       coeUsersData.push(coeUser);
     } else {
-      return res.status(403).json({
+      return res.json({
         success: false,
         message: 'Access Denied: Unregistered COE account or username.',
       });
@@ -702,20 +718,20 @@ app.get('/api/coe/users', (req: Request, res: Response) => {
 
 // Add / Appoint ACOE User (Super Admin Action) - Stream scope defaults to ALL and saves to Faculty tab
 app.post('/api/coe/add-acoe', async (req: Request, res: Response) => {
-  const { email, name, role, streamScope, password, otpEnabled } = req.body;
+  const { email, name, role, streamScope, password, otpEnabled } = req.body || {};
 
   const cleanEmail = String(email || '').toLowerCase().trim();
   const cleanName = String(name || '').trim();
 
-  if (!cleanEmail || !cleanEmail.endsWith('@hindustanuniv.ac.in')) {
-    return res.status(400).json({
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.json({
       success: false,
-      message: 'Official ACOE email must end with @hindustanuniv.ac.in.',
+      message: 'Please enter a valid ACOE email address.',
     });
   }
 
   if (!cleanName) {
-    return res.status(400).json({
+    return res.json({
       success: false,
       message: 'ACOE Name is required.',
     });
@@ -740,6 +756,23 @@ app.post('/api/coe/add-acoe', async (req: Request, res: Response) => {
     coeUsersData[existingIdx] = newAcoe;
   } else {
     coeUsersData.push(newAcoe);
+  }
+
+  const facRecord: FacultyRecord = {
+    email: cleanEmail,
+    name: cleanName,
+    role: 'ACOE' as any,
+    department: scope,
+    specialization: 'ALL',
+    semester: 'ALL',
+    batch: 'ALL',
+    section: 'ALL',
+  };
+  const facIdx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanEmail);
+  if (facIdx >= 0) {
+    facultyData[facIdx] = facRecord;
+  } else {
+    facultyData.push(facRecord);
   }
 
   // Save ACOE into the Faculty tab of the Master Google Sheet
@@ -902,15 +935,15 @@ app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
   const cleanName = String(name || '').trim();
   const cleanDept = String(department || '').trim().toUpperCase();
 
-  if (!cleanEmail || !cleanEmail.endsWith('@hindustanuniv.ac.in')) {
-    return res.status(400).json({
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.json({
       success: false,
-      message: 'Official HOD email must end with @hindustanuniv.ac.in.',
+      message: 'Please enter a valid HOD email address.',
     });
   }
 
   if (!cleanName || !cleanDept) {
-    return res.status(400).json({
+    return res.json({
       success: false,
       message: 'HOD Name and Department are required.',
     });

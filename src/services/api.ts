@@ -134,35 +134,8 @@ export const api = {
   async sendOtp(email: string, portalType: 'student' | 'faculty' | 'coe'): Promise<ApiResponse> {
     const cleanEmail = email.toLowerCase().trim();
 
-    if (!cleanEmail) {
-      return { success: false, message: 'Email address is required.' };
-    }
-
-    const isStudentOfficialDomain = cleanEmail.endsWith('@student.hindustanuniv.ac.in');
-    const isFacultyOfficialDomain = cleanEmail.endsWith('@hindustanuniv.ac.in');
-    const isPersonalGmail = cleanEmail.endsWith('@gmail.com');
-
-    if (portalType === 'coe') {
-      if (!isFacultyOfficialDomain) {
-        return {
-          success: false,
-          message: 'Access Denied: Controller of Examinations (COE) portal is restricted to university administrator accounts (@hindustanuniv.ac.in).',
-        };
-      }
-    } else if (portalType === 'faculty') {
-      if (!isFacultyOfficialDomain || cleanEmail.endsWith('@student.hindustanuniv.ac.in')) {
-        return {
-          success: false,
-          message: 'Access Denied: Faculty login is restricted strictly to official @hindustanuniv.ac.in domain.',
-        };
-      }
-    } else {
-      if (!isStudentOfficialDomain && !isPersonalGmail) {
-        return {
-          success: false,
-          message: 'Please enter a valid university email (@student.hindustanuniv.ac.in) or Gmail (@gmail.com).',
-        };
-      }
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, message: 'Please enter a valid email address.' };
     }
 
     // Try Express backend first when available
@@ -753,57 +726,153 @@ export const api = {
 
   // Get list of registered ACOE Users (Super Admin only)
   async getCoeUsers(): Promise<ApiResponse> {
+    let serverUsers: any[] = [];
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/users'));
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
-          return await response.json();
+          const data = await response.json();
+          if (Array.isArray(data.users)) {
+            serverUsers = data.users;
+          }
         }
       } catch {
         // Fallback
       }
     }
+
+    // Merge with any locally saved ACOE users from Faculty storage
+    const localAcoes = storage
+      .getFaculty()
+      .filter((f) => String(f.role).toUpperCase().includes('ACOE'))
+      .map((f) => ({
+        email: f.email.toLowerCase(),
+        name: f.name,
+        role: 'ACOE',
+        streamScope: f.department || 'ALL',
+        otpEnabled: (f as any).otpEnabled !== false,
+        addedAt: new Date().toISOString(),
+      }));
+
+    const mergedMap = new Map<string, any>();
+    for (const u of serverUsers) {
+      if (u && u.email) mergedMap.set(u.email.toLowerCase(), u);
+    }
+    for (const u of localAcoes) {
+      if (u && u.email && !mergedMap.has(u.email.toLowerCase())) {
+        mergedMap.set(u.email.toLowerCase(), u);
+      }
+    }
+
     return {
       success: true,
-      users: [],
+      users: Array.from(mergedMap.values()),
     };
   },
 
   // Add or Appoint new ACOE Administrator
   async addAcoeUser(payload: { email: string; name: string; password?: string; role?: string; streamScope?: string; otpEnabled?: boolean }): Promise<ApiResponse> {
+    const cleanEmail = String(payload.email || '').toLowerCase().trim();
+    const cleanName = String(payload.name || '').trim();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanName) {
+      return { success: false, message: 'Valid ACOE Email and Full Name are required.' };
+    }
+
+    const fullPayload = {
+      email: cleanEmail,
+      name: cleanName,
+      role: payload.role || 'ACOE',
+      streamScope: payload.streamScope || 'ALL',
+      password: payload.password || 'Acoe@123',
+      otpEnabled: payload.otpEnabled !== false,
+    };
+
+    // Always persist to local Faculty storage so UI stays in sync
+    const faculty = storage.getFaculty();
+    const newAcoeRecord: FacultyRecord & { otpEnabled?: boolean } = {
+      email: cleanEmail,
+      name: cleanName,
+      role: 'ACOE' as any,
+      department: fullPayload.streamScope,
+      specialization: 'ALL',
+      semester: 'ALL',
+      batch: 'ALL',
+      section: 'ALL',
+      otpEnabled: fullPayload.otpEnabled,
+    };
+    const existingIdx = faculty.findIndex((f) => f.email.toLowerCase() === cleanEmail);
+    if (existingIdx >= 0) {
+      faculty[existingIdx] = newAcoeRecord;
+    } else {
+      faculty.push(newAcoeRecord);
+    }
+    storage.saveFaculty(faculty);
+
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/add-acoe'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(fullPayload),
         });
         const contentType = response.headers.get('content-type') || '';
-        if (response.status !== 405 && contentType.includes('application/json')) {
+        if (response.ok && contentType.includes('application/json')) {
           return await response.json();
         }
       } catch {
-        // Fallback
+        // Fallback to GAS / local storage
       }
     }
+
+    const config = storage.getConfig();
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'addAcoe',
+            email: cleanEmail,
+            name: cleanName,
+            role: 'ACOE',
+            department: fullPayload.streamScope,
+            specialization: 'ALL',
+            semester: 'ALL',
+            batch: 'ALL',
+            section: 'ALL',
+          }),
+        });
+      } catch {
+        // Ignore network error
+      }
+    }
+
     return {
       success: true,
-      message: `ACOE user ${payload.name} (${payload.email}) registered successfully.`,
+      message: `ACOE user ${cleanName} (${cleanEmail}) appointed successfully.`,
     };
   },
 
   // Toggle Email OTP Alone Any Time (Super Admin Action)
   async toggleAcoeOtp(email: string, otpEnabled: boolean): Promise<ApiResponse> {
+    const cleanEmail = String(email || '').toLowerCase().trim();
+    const faculty = storage.getFaculty();
+    const idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanEmail);
+    if (idx >= 0) {
+      (faculty[idx] as any).otpEnabled = otpEnabled;
+      storage.saveFaculty(faculty);
+    }
+
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/toggle-otp'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, otpEnabled }),
+          body: JSON.stringify({ email: cleanEmail, otpEnabled }),
         });
         const contentType = response.headers.get('content-type') || '';
-        if (response.status !== 405 && contentType.includes('application/json')) {
+        if (response.ok && contentType.includes('application/json')) {
           return await response.json();
         }
       } catch {
@@ -812,7 +881,7 @@ export const api = {
     }
     return {
       success: true,
-      message: `Email OTP status updated for ${email}.`,
+      message: `Email OTP status updated for ${cleanEmail}.`,
     };
   },
 
@@ -826,7 +895,7 @@ export const api = {
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
-        if (response.status !== 405 && contentType.includes('application/json')) {
+        if (response.ok && contentType.includes('application/json')) {
           return await response.json();
         }
       } catch {
@@ -841,15 +910,19 @@ export const api = {
 
   // Delete / Remove ACOE User Email
   async deleteAcoeUser(email: string): Promise<ApiResponse> {
+    const cleanEmail = String(email || '').toLowerCase().trim();
+    const faculty = storage.getFaculty().filter((f) => f.email.toLowerCase() !== cleanEmail);
+    storage.saveFaculty(faculty);
+
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/delete-acoe'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email: cleanEmail }),
         });
         const contentType = response.headers.get('content-type') || '';
-        if (response.status !== 405 && contentType.includes('application/json')) {
+        if (response.ok && contentType.includes('application/json')) {
           return await response.json();
         }
       } catch {
@@ -858,7 +931,7 @@ export const api = {
     }
     return {
       success: true,
-      message: `ACOE user ${email} removed.`,
+      message: `ACOE user ${cleanEmail} removed.`,
     };
   },
 

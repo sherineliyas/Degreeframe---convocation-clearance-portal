@@ -437,7 +437,7 @@ export const SuperAdminPortal: React.FC = () => {
                     required
                   />
                   <span className="text-[10px] text-slate-400 mt-1 block">
-                    Must end with @hindustanuniv.ac.in
+                    Supports @hindustanuniv.ac.in or authorized email addresses
                   </span>
                 </div>
 

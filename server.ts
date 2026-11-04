@@ -545,11 +545,15 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     role: portalType,
   };
 
-  // Dispatch email asynchronously / bounded wait so Render never hangs on blocked outbound SMTP port 587
-  Promise.race([
-    sendOfficialOtpEmail(email, otp, portalType),
-    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500)),
-  ]).catch(() => {});
+  // Dispatch official email via Nodemailer (SMTP: dycoe@hindustanuniv.ac.in)
+  const isSent = await sendOfficialOtpEmail(email, otp, portalType);
+
+  if (!isSent && !process.env.SMTP_PASS) {
+    return res.json({
+      success: true,
+      message: `OTP generated for ${email}. Note: Real SMTP dispatch requires 'SMTP_PASS' set in Render environment variables.`,
+    });
+  }
 
   return res.json({
     success: true,

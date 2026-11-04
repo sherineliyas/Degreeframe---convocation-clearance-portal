@@ -50,7 +50,7 @@ export const CoePortal: React.FC = () => {
     }
     const email = sessionStorage.getItem('coe_session_email');
     if (email) {
-      const isSuper = email === 'admin@hindustanuniv.ac.in';
+      const isSuper = email === 'superadmin@hindustanuniv.ac.in' || email.includes('superadmin');
       const isEngg = email.includes('1') || email.includes('engg');
       return {
         email,
@@ -821,15 +821,6 @@ export const CoePortal: React.FC = () => {
             >
               <BookOpen className="w-3.5 h-3.5" />
               COE Manual
-            </button>
-            <button
-              onClick={loadCoeData}
-              disabled={isLoadingData}
-              title="Sync latest records from database"
-              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-sm transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingData ? 'animate-spin' : ''}`} />
-              Sync Data
             </button>
             <button
               onClick={handleLogout}

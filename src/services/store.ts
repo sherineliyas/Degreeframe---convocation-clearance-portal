@@ -19,10 +19,10 @@ export interface AppConfig {
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
-  scriptUrl: '',
+  scriptUrl: 'https://script.google.com/macros/s/AKfycbwB7rlI6iUJCIFmL8WM0ZhDdKFIxobATliqpUxOAVd0dcsBwVeFd5ZXwQrgMRh1NafggA/exec',
   useLiveScript: true,
-  spreadsheetId: '',
-  parentFolderId: '',
+  spreadsheetId: '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ',
+  parentFolderId: '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
 };
 
 class StorageService {

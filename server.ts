@@ -142,7 +142,38 @@ interface CoeUserRecord {
   addedAt?: string;
 }
 
-const INITIAL_COE_USERS: CoeUserRecord[] = [];
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwB7rlI6iUJCIFmL8WM0ZhDdKFIxobATliqpUxOAVd0dcsBwVeFd5ZXwQrgMRh1NafggA/exec';
+
+const INITIAL_COE_USERS: CoeUserRecord[] = [
+  {
+    username: 'superadmin',
+    email: 'superadmin@hindustanuniv.ac.in',
+    name: 'Chief COE Super Admin',
+    role: 'SUPER_ADMIN',
+    streamScope: 'ALL',
+    password: 'Admin@123',
+    isDefaultPassword: true,
+    otpEnabled: true,
+  },
+  {
+    email: 'dycoe@hindustanuniv.ac.in',
+    name: 'Dr. Dycoe (ACOE)',
+    role: 'ACOE',
+    streamScope: 'ALL',
+    password: 'Acoe@123',
+    isDefaultPassword: true,
+    otpEnabled: true,
+  },
+  {
+    email: 'acoe@hindustanuniv.ac.in',
+    name: 'Controller of Examinations (ACOE)',
+    role: 'ACOE',
+    streamScope: 'ALL',
+    password: 'Acoe@123',
+    isDefaultPassword: true,
+    otpEnabled: true,
+  },
+];
 
 let coeUsersData: CoeUserRecord[] = [...INITIAL_COE_USERS];
 
@@ -178,14 +209,14 @@ let coeSettings: CoeSettings = {
   spreadsheetId: '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ',
   driveFolderUrl: 'https://drive.google.com/drive/folders/1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
   driveFolderId: '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
-  scriptUrl: process.env.GOOGLE_SCRIPT_URL || '',
+  scriptUrl: process.env.GAS_WEB_APP_URL || process.env.GOOGLE_SCRIPT_URL || DEFAULT_GAS_URL,
   academicYear: '2024-2025',
   convocationBatch: '34th Convocation Ceremony',
 };
 
 // Helper to forward actions to Google Apps Script (Code.gs) for Google Drive .jpg creation & Google Sheets persistence
 async function callGoogleAppsScript(action: string, payload: Record<string, any>): Promise<any | null> {
-  const targetScriptUrl = (coeSettings.scriptUrl || process.env.GOOGLE_SCRIPT_URL || '').trim();
+  const targetScriptUrl = (coeSettings.scriptUrl || process.env.GAS_WEB_APP_URL || process.env.GOOGLE_SCRIPT_URL || DEFAULT_GAS_URL).trim();
   if (!targetScriptUrl || !targetScriptUrl.startsWith('http')) {
     return null;
   }
@@ -257,17 +288,18 @@ async function syncFromMasterSheet(force = false): Promise<boolean> {
     if (Array.isArray(gasSync.faculty) && gasSync.faculty.length > 0) {
       facultyData = gasSync.faculty;
       for (const f of facultyData) {
-        if (String(f.role).toUpperCase().includes('ACOE')) {
+        const rUpper = String(f.role).toUpperCase();
+        if (rUpper.includes('ACOE') || rUpper.includes('COE') || rUpper.includes('SUPER_ADMIN')) {
           const exists = coeUsersData.some((u) => u.email.toLowerCase() === f.email.toLowerCase());
           if (!exists) {
             coeUsersData.push({
               email: f.email.toLowerCase(),
               name: f.name,
-              role: 'ACOE',
+              role: rUpper.includes('SUPER') ? 'SUPER_ADMIN' : 'ACOE',
               streamScope: (f.department === 'ENGINEERING' || f.department === 'NON_ENGINEERING' ? f.department : 'ALL') as any,
               password: 'Acoe@123',
               isDefaultPassword: true,
-              otpEnabled: true,
+              otpEnabled: (f as any).otpEnabled !== false,
             });
           }
         }
@@ -327,13 +359,14 @@ async function syncFromMasterSheet(force = false): Promise<boolean> {
         section: (r[7] || 'ALL').toUpperCase(),
       }));
       for (const f of facultyData) {
-        if (String(f.role).toUpperCase().includes('ACOE')) {
+        const rUpper = String(f.role).toUpperCase();
+        if (rUpper.includes('ACOE') || rUpper.includes('COE') || rUpper.includes('SUPER_ADMIN')) {
           const exists = coeUsersData.some((u) => u.email.toLowerCase() === f.email.toLowerCase());
           if (!exists) {
             coeUsersData.push({
               email: f.email.toLowerCase(),
               name: f.name,
-              role: 'ACOE',
+              role: rUpper.includes('SUPER') ? 'SUPER_ADMIN' : 'ACOE',
               streamScope: (f.department === 'ENGINEERING' || f.department === 'NON_ENGINEERING' ? f.department : 'ALL') as any,
               password: 'Acoe@123',
               isDefaultPassword: true,

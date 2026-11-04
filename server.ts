@@ -476,9 +476,9 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
         host: smtpHost,
         port,
         secure: port === 465,
-        connectionTimeout: 4000,
-        greetingTimeout: 4000,
-        socketTimeout: 5000,
+        connectionTimeout: 2500,
+        greetingTimeout: 2500,
+        socketTimeout: 3500,
         auth: {
           user: smtpUser,
           pass: smtpPass,
@@ -494,7 +494,20 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
     }
   }
 
-  return { success: false, error: lastError };
+  // If direct SMTP is blocked by Render firewall (connection timeout on 465/587), fallback to Google Apps Script over HTTPS Port 443
+  console.log(`[SMTP-FALLBACK] Direct SMTP failed on Render. Dispatching via Google Apps Script HTTPS (Port 443)...`);
+  const gasRes = await callGoogleAppsScript('sendOtp', {
+    email: recipientEmail,
+    otp: otpCode,
+    portalType: portalRole,
+  });
+
+  if (gasRes && gasRes.success) {
+    console.log(`[SMTP-FALLBACK-SUCCESS] OTP email delivered via Google Apps Script HTTPS dispatch.`);
+    return { success: true };
+  }
+
+  return { success: false, error: lastError || 'SMTP connection timeout on Render.' };
 }
 
 // ==========================================

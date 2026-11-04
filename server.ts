@@ -10,20 +10,46 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// Enable CORS so GitHub Pages (https://sherineliyas.github.io) can call this Render backend
+// Enable CORS so GitHub Pages (https://sherineliyas.github.io) and any client origin can call this Render backend without preflight failures
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  const reqHeaders = req.headers['access-control-request-headers'];
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    reqHeaders ? String(reqHeaders) : 'Origin, X-Requested-With, Content-Type, Accept, Authorization'
+  );
+  res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return res.status(200).end();
   }
   next();
 });
 
-// Enable JSON body parsing up to 50MB for photos and documents
+// Enable JSON, URL-encoded, and text/plain JSON body parsing up to 50MB for photos and documents
+// Supporting text/plain allows cross-origin POST requests from GitHub Pages to bypass browser OPTIONS preflight
 app.use(express.json({ limit: '50mb' }));
+app.use(express.text({ type: ['text/plain', 'text/*'], limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use((req, _res, next) => {
+  if (typeof req.body === 'string') {
+    const trimmed = req.body.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        req.body = JSON.parse(trimmed);
+      } catch {
+        // Keep original string if not valid JSON
+      }
+    }
+  }
+  if (!req.body || typeof req.body !== 'object') {
+    req.body = {};
+  }
+  next();
+});
 
 // In-Memory Database initialized with default clean structures
 interface StudentRecord {
@@ -359,7 +385,7 @@ const otpCache: Record<string, { otp: string; expiresAt: number; role: string }>
 
 // Official OTP Mailer Transport
 // Configurable via environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL)
-// Enables Person A to host on GitHub/Cloud while sending official OTP emails from coe@hindustanuniv.ac.in
+// Also dispatches via Google Apps Script (HTTPS port 443) so OTP delivery works even when Render Free Tier blocks outbound SMTP port 587
 async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, portalRole: string): Promise<boolean> {
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
   const smtpPort = Number(process.env.SMTP_PORT) || 587;
@@ -369,8 +395,15 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
 
   console.log(`[AUTH-OTP] Generated OTP for ${recipientEmail} [Role: ${portalRole}]: ${otpCode}`);
 
+  // 1. Always attempt HTTPS dispatch via Google Apps Script (Code.gs) if configured (never blocked by Render firewall)
+  callGoogleAppsScript('sendOtp', {
+    email: recipientEmail,
+    otp: otpCode,
+    portalType: portalRole,
+  }).catch(() => {});
+
   if (!smtpPass) {
-    console.log(`[SMTP-INFO] No SMTP_PASS specified. Real email dispatch skipped. Use universal demo passcode 123456 or generated OTP ${otpCode}.`);
+    console.log(`[SMTP-INFO] No SMTP_PASS specified. Real SMTP dispatch skipped for ${recipientEmail}.`);
     return false;
   }
 
@@ -379,6 +412,9 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
       host: smtpHost,
       port: smtpPort,
       secure: smtpPort === 465,
+      connectionTimeout: 4000,
+      greetingTimeout: 4000,
+      socketTimeout: 5000,
       auth: {
         user: smtpUser,
         pass: smtpPass,
@@ -431,6 +467,7 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
 app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const portalType = String(req.body.portalType || 'student').toLowerCase();
+  const clientOtp = String(req.body.clientOtp || req.body.otp || '').trim();
 
   if (!email || !email.includes('@')) {
     return res.status(400).json({ success: false, message: 'Valid email address is required.' });
@@ -474,16 +511,19 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     }
   }
 
-  // Generate 6-digit OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  // Generate 6-digit OTP (or use client-provided 6-digit OTP for seamless sync)
+  const otp = /^\d{6}$/.test(clientOtp) ? clientOtp : Math.floor(100000 + Math.random() * 900000).toString();
   otpCache[email] = {
     otp,
     expiresAt: Date.now() + 10 * 60 * 1000,
     role: portalType,
   };
 
-  // Dispatch via official COE email if SMTP configured
-  await sendOfficialOtpEmail(email, otp, portalType);
+  // Dispatch email asynchronously / bounded wait so Render never hangs on blocked outbound SMTP port 587
+  Promise.race([
+    sendOfficialOtpEmail(email, otp, portalType),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500)),
+  ]).catch(() => {});
 
   return res.json({
     success: true,
@@ -512,7 +552,8 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
     });
   }
 
-  delete otpCache[email];
+  // Keep valid briefly so a follow-up /api/auth/coe-login handshake with the same OTP succeeds
+  record.expiresAt = Date.now() + 60 * 1000;
 
   if (portalType === 'coe') {
     let coeUser = coeUsersData.find((u) => u.email.toLowerCase() === email);

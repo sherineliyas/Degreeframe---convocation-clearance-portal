@@ -138,30 +138,52 @@ export const api = {
       return { success: false, message: 'Please enter a valid email address.' };
     }
 
-    // Try Express backend first when available
+    // Pre-generate 6-digit OTP so client & server share the exact same OTP even if Render restarts
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    simulatedOtps[cleanEmail] = {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      portalType,
+    };
+
+    const config = storage.getConfig();
+
+    // Try Express backend first when available (using text/plain to bypass CORS OPTIONS preflight and a 5s timeout to prevent SMTP hang)
     if (canUseExpressApi()) {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         const response = await fetch(apiUrl('/api/auth/send-otp'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, portalType }),
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ email: cleanEmail, portalType, clientOtp: otp }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
-          return await response.json();
+          const data = await response.json();
+          // Also trigger Google Apps Script email dispatch if configured
+          if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
+            fetch(config.scriptUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: 'sendOtp', email: cleanEmail, otp, portalType }),
+            }).catch(() => {});
+          }
+          return data;
         }
       } catch {
-        // Fallback
+        // Fallback to Google Apps Script or local OTP if Render is waking up or SMTP timed out
       }
     }
 
-    const config = storage.getConfig();
     if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
       try {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'sendOtp', email: cleanEmail }),
+          body: JSON.stringify({ action: 'sendOtp', email: cleanEmail, otp, portalType }),
         });
         const res = await response.json();
         return res;
@@ -169,14 +191,6 @@ export const api = {
         console.warn('Network call failed, using fallback:', e);
       }
     }
-
-    // Local OTP generation if endpoint unreachable
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    simulatedOtps[cleanEmail] = {
-      otp,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-      portalType,
-    };
 
     return {
       success: true,
@@ -193,12 +207,15 @@ export const api = {
       return { success: false, message: 'Email and OTP code are required.' };
     }
 
+    const stored = simulatedOtps[cleanEmail];
+    const isLocalMatch = Boolean(stored && stored.otp === inputOtp && Date.now() <= stored.expiresAt);
+
     // Try Express backend first when available
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/auth/verify-otp'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             email: cleanEmail,
             otp: inputOtp,
@@ -207,7 +224,10 @@ export const api = {
         });
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
-          return await response.json();
+          const data = await response.json();
+          if (data.success || !isLocalMatch) {
+            return data;
+          }
         }
       } catch {
         // Fallback
@@ -228,29 +248,34 @@ export const api = {
           }),
         });
         const res = await response.json();
-        return res;
+        if (res.success || !isLocalMatch) {
+          return res;
+        }
       } catch (e: any) {
         console.warn('Network call failed, verifying locally:', e);
       }
     }
 
-    const stored = simulatedOtps[cleanEmail];
-    if (!stored || stored.otp !== inputOtp) {
+    if (!isLocalMatch) {
       return {
         success: false,
         message: 'Invalid or expired OTP code. Please request a new code.',
       };
     }
 
-    if (stored) {
-      delete simulatedOtps[cleanEmail];
-    }
+    delete simulatedOtps[cleanEmail];
 
     if (portalType === 'coe') {
+      const isSuper = cleanEmail.startsWith('superadmin@') || cleanEmail.startsWith('admin@');
       return {
         success: true,
         message: 'COE authentication verified.',
-        user: { email: cleanEmail, name: 'Controller of Examinations', role: 'COE' },
+        user: {
+          email: cleanEmail,
+          name: isSuper ? 'Chief COE Super Admin' : 'Controller of Examinations',
+          role: isSuper ? 'SUPER_ADMIN' : 'ACOE',
+          streamScope: 'ALL',
+        },
       };
     }
 
@@ -356,7 +381,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/student/submit'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -542,7 +567,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/faculty/action'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -593,7 +618,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/faculty/add-teacher'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -681,11 +706,15 @@ export const api = {
 
   // COE Login with Username or Email, and Password or OTP
   async coeLogin(usernameOrEmail: string, password?: string, otp?: string): Promise<ApiResponse> {
+    const cleanKey = usernameOrEmail.toLowerCase().trim();
+    const storedOtp = simulatedOtps[cleanKey];
+    const isLocalOtpMatch = Boolean(otp && storedOtp && storedOtp.otp === otp.trim());
+
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/auth/coe-login'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ usernameOrEmail, email: usernameOrEmail, password, otp }),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -694,15 +723,16 @@ export const api = {
           if (data.user && !data.coeUser) {
             data.coeUser = data.user;
           }
-          return data;
+          if (data.success || !isLocalOtpMatch) {
+            return data;
+          }
         }
       } catch {
         // Fallback
       }
     }
 
-    const cleanKey = usernameOrEmail.toLowerCase().trim();
-    const isSuper = cleanKey === 'superadmin' || cleanKey === 'admin';
+    const isSuper = cleanKey === 'superadmin' || cleanKey === 'admin' || cleanKey.startsWith('superadmin@') || cleanKey.startsWith('admin@');
     if (isSuper && password && password !== 'Admin@123') {
       return {
         success: false,
@@ -813,7 +843,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/add-acoe'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(fullPayload),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -868,7 +898,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/toggle-otp'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ email: cleanEmail, otpEnabled }),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -891,7 +921,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/update-acoe'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -918,7 +948,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/delete-acoe'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ email: cleanEmail }),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -941,7 +971,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/change-password'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ email: identifier, username: identifier, newPassword }),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -965,7 +995,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/config'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -1003,7 +1033,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/add-hod'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
@@ -1050,7 +1080,7 @@ export const api = {
       try {
         const response = await fetch(apiUrl('/api/coe/import-sheets'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';

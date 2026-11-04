@@ -155,7 +155,7 @@ export const api = {
     if (canUseExpressApi()) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         const response = await fetch(apiUrl('/api/auth/send-otp'), {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },

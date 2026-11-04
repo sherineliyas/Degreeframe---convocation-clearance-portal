@@ -28,6 +28,7 @@ import {
 import { api } from '../services/api';
 import { UserManualModal } from './UserManualModal';
 import { FacultyRecord, SubmissionRecord, CoeSettings, CoeOverviewStats } from '../types';
+import { downloadMasterExcelTemplate } from '../utils/excelTemplate';
 
 interface CoeUserInfo {
   email: string;
@@ -1401,17 +1402,28 @@ export const CoePortal: React.FC = () => {
                 </p>
               </div>
 
-              {settings.spreadsheetUrl && (
-                <a
-                  href={settings.spreadsheetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold border border-purple-200 transition-all flex items-center gap-1.5 self-start"
+              <div className="flex flex-wrap items-center gap-2 self-start">
+                <button
+                  type="button"
+                  onClick={downloadMasterExcelTemplate}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Open Live Google Sheet
-                </a>
-              )}
+                  <Download className="w-3.5 h-3.5" />
+                  Download 3-Tab Master Excel (.xlsx)
+                </button>
+
+                {settings.spreadsheetUrl && (
+                  <a
+                    href={settings.spreadsheetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold border border-purple-200 transition-all flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open Live Google Sheet
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* Target Tab Selection */}

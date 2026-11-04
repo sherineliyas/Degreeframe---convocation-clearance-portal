@@ -58,6 +58,7 @@ function doPost(e) {
           nationality: payload.nationality,
           department: payload.department || payload.branch,
           specialization: payload.specialization,
+          semester: payload.semester || "VIII",
           section: payload.section,
           batch: payload.batch || "Batch A",
           isNameCorrected: payload.isNameCorrected,
@@ -387,6 +388,7 @@ function processStudentSubmission(formObject) {
   const nationality = sanitizeText(formObject.nationality);
   const dept = sanitizeText(formObject.department || "BRANCH").toUpperCase();
   const spec = sanitizeText(formObject.specialization || "GENERAL").toUpperCase();
+  const semester = sanitizeText(formObject.semester || "VIII").toUpperCase();
   const section = sanitizeText(formObject.section || "SEC").toUpperCase();
   const batch = sanitizeText(formObject.batch || "Batch A").toUpperCase();
 
@@ -398,7 +400,7 @@ function processStudentSubmission(formObject) {
 
     if (existingRegNo === cleanRegNo) {
       existingRowIndex = i + 1;
-      const existingStatus = String(data[i][17] || "").toUpperCase().trim();
+      const existingStatus = String(data[i][18] || data[i][17] || "").toUpperCase().trim();
 
       const isRejected = existingStatus.includes("REJECTED") || existingStatus === "AUTO_REJECTED";
 
@@ -501,17 +503,18 @@ function processStudentSubmission(formObject) {
       nationality,         // Col H (8) Nationality
       dept,                // Col I (9) Department_Branch
       spec,                // Col J (10) Specialization
-      section,             // Col K (11) Section
-      batch,               // Col L (12) Batch
-      `${regNo}.jpg`,      // Col M (13) Photo_Upload
-      savedPhoto.getUrl(), // Col N (14) Final_Drive_URL
-      proof10thUrl,        // Col O (15) Proof_10th_URL
-      proofTcUrl,          // Col P (16) Proof_TC_URL
-      correctionNotes,     // Col Q (17) Validation_Notes
-      "PENDING_TEACHER",   // Col R (18) Approval_Status
-      "",                  // Col S (19) Teacher_Remarks
-      "",                  // Col T (20) HOD_Remarks
-      ""                   // Col U (21) Dean_Remarks
+      semester,            // Col K (11) Semester
+      section,             // Col L (12) Section
+      batch,               // Col M (13) Batch
+      `${regNo}.jpg`,      // Col N (14) Photo_Upload
+      savedPhoto.getUrl(), // Col O (15) Final_Drive_URL
+      proof10thUrl,        // Col P (16) Proof_10th_URL
+      proofTcUrl,          // Col Q (17) Proof_TC_URL
+      correctionNotes,     // Col R (18) Validation_Notes
+      "PENDING_TEACHER",   // Col S (19) Approval_Status
+      "",                  // Col T (20) Teacher_Remarks
+      "",                  // Col U (21) HOD_Remarks
+      ""                   // Col V (22) Dean_Remarks
     ];
 
     writeToSheet(sheet, existingRowIndex, rowValues);
@@ -796,17 +799,17 @@ function updateApprovalStatus(payload) {
   let remarkColIndex = -1;
 
   if (role.includes("TEACHER")) {
-    remarkColIndex = 19; // Col S (Teacher_Remarks)
+    remarkColIndex = 20; // Col T (Teacher_Remarks)
     nextStatus = isApproved ? "PENDING_HOD" : "REJECTED_BY_TEACHER";
   } else if (role.includes("HOD")) {
-    remarkColIndex = 20; // Col T (HOD_Remarks)
+    remarkColIndex = 21; // Col U (HOD_Remarks)
     nextStatus = isApproved ? "APPROVED" : "REJECTED_BY_HOD";
   } else {
-    remarkColIndex = 19;
+    remarkColIndex = 20;
     nextStatus = isApproved ? "APPROVED" : "REJECTED";
   }
 
-  sheet.getRange(rowIndex, 18).setValue(nextStatus); // Col R (Approval_Status)
+  sheet.getRange(rowIndex, 19).setValue(nextStatus); // Col S (Approval_Status)
   if (remarkColIndex > 0) {
     sheet.getRange(rowIndex, remarkColIndex).setValue(remarks);
   }
@@ -915,6 +918,7 @@ function handleAddClassTeacher(payload) {
   const teacherName = (payload.teacherName || "").trim();
   const department = (payload.department || authRes.faculty.department).trim();
   const specialization = (payload.specialization || "GENERAL").trim();
+  const semester = (payload.semester || "VIII").trim().toUpperCase();
   const section = (payload.section || "A").trim().toUpperCase();
   const batch = (payload.batch || "Batch A").trim();
 
@@ -934,8 +938,9 @@ function handleAddClassTeacher(payload) {
     "TEACHER",
     department,
     specialization,
-    section,
-    batch
+    semester,
+    batch,
+    section
   ]);
 
   return { 

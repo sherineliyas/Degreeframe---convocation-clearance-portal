@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { storage } from '../services/store';
 import { FacultyRecord, SubmissionRecord } from '../types';
 import { UserManualModal } from './UserManualModal';
+import { formatDriveImageUrl } from '../utils/imageUtils';
 import {
   ShieldCheck,
   UserCheck,
@@ -615,9 +616,13 @@ export const FacultyPortal: React.FC = () => {
                 <div>
                   <div className="w-[200px] h-[240px] mx-auto bg-white border-2 border-slate-300 rounded-lg overflow-hidden shadow-md">
                     <img
-                      src={previewMedia.student.finalDriveUrl}
+                      src={formatDriveImageUrl(previewMedia.student.finalDriveUrl)}
                       alt="Student"
                       className="w-full h-full object-cover"
+                      onError={(e: any) => {
+                        e.target.onerror = null;
+                        e.target.src = 'https://via.placeholder.com/200x240?text=Photo';
+                      }}
                     />
                   </div>
                   <div className="mt-4 p-3 bg-white rounded-xl border border-slate-200 text-left text-xs space-y-1.5">

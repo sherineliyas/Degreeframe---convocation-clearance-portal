@@ -242,6 +242,40 @@ function saveCoeUsersToDisk() {
   }
 }
 
+const FACULTY_FILE_PATH = path.resolve(__dirname, 'faculty_data.json');
+
+function loadFacultyFromDisk() {
+  try {
+    if (fs.existsSync(FACULTY_FILE_PATH)) {
+      const saved: FacultyRecord[] = JSON.parse(fs.readFileSync(FACULTY_FILE_PATH, 'utf-8'));
+      if (Array.isArray(saved) && saved.length > 0) {
+        for (const f of saved) {
+          if (!f || !f.email) continue;
+          const idx = facultyData.findIndex(
+            (e) => e.email.toLowerCase() === f.email.toLowerCase() && e.department.toUpperCase() === f.department.toUpperCase()
+          );
+          if (idx >= 0) {
+            facultyData[idx] = { ...facultyData[idx], ...f };
+          } else {
+            facultyData.push(f);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[FACULTY] Could not load faculty_data.json:', e);
+  }
+}
+loadFacultyFromDisk();
+
+function saveFacultyToDisk() {
+  try {
+    fs.writeFileSync(FACULTY_FILE_PATH, JSON.stringify(facultyData, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[FACULTY] Could not save faculty_data.json:', e);
+  }
+}
+
 
 function matchesStreamScope(deptBranch: string = '', streamScope: 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING' = 'ALL'): boolean {
   if (!streamScope || streamScope === 'ALL') return true;
@@ -1232,10 +1266,66 @@ app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
     section: 'ALL',
   });
 
+  saveFacultyToDisk();
+
   return res.json({
     success: true,
     message: `Head of Department (HOD) for ${cleanDept} assigned and saved to Master Sheet Faculty tab: ${cleanName} (${cleanEmail}).`,
     hod: newHodRecord,
+  });
+});
+
+// COE UI: Update / Edit HOD Details
+app.post('/api/coe/update-hod', async (req: Request, res: Response) => {
+  const { oldEmail, newEmail, name, department, specialization } = req.body;
+  const cleanOldEmail = String(oldEmail || '').toLowerCase().trim();
+  const cleanNewEmail = String(newEmail || cleanOldEmail).toLowerCase().trim();
+  const cleanName = String(name || '').trim();
+  const cleanDept = String(department || '').trim().toUpperCase();
+
+  const idx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'HOD');
+  if (idx < 0) {
+    return res.status(404).json({ success: false, message: `HOD record for ${cleanOldEmail} not found.` });
+  }
+
+  const updated: FacultyRecord = {
+    ...facultyData[idx],
+    email: cleanNewEmail,
+    name: cleanName || facultyData[idx].name,
+    department: cleanDept || facultyData[idx].department,
+    specialization: specialization ? String(specialization).trim().toUpperCase() : facultyData[idx].specialization,
+  };
+
+  facultyData[idx] = updated;
+  saveFacultyToDisk();
+
+  return res.json({
+    success: true,
+    message: `HOD details for ${updated.name} (${updated.email}) updated successfully.`,
+    hod: updated,
+  });
+});
+
+// COE UI: Remove / Delete HOD
+app.post('/api/coe/delete-hod', async (req: Request, res: Response) => {
+  const { email, department } = req.body;
+  const cleanEmail = String(email || '').toLowerCase().trim();
+  const cleanDept = String(department || '').trim().toUpperCase();
+
+  const idx = facultyData.findIndex(
+    (f) => f.role === 'HOD' && (f.email.toLowerCase() === cleanEmail || (cleanDept && f.department.toUpperCase() === cleanDept))
+  );
+
+  if (idx < 0) {
+    return res.status(404).json({ success: false, message: `HOD record not found.` });
+  }
+
+  const removed = facultyData.splice(idx, 1)[0];
+  saveFacultyToDisk();
+
+  return res.json({
+    success: true,
+    message: `HOD ${removed.name} (${removed.email}) for department ${removed.department} removed.`,
   });
 });
 
@@ -1643,6 +1733,7 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
   };
 
   facultyData.push(newTeacher);
+  saveFacultyToDisk();
 
   // Sync to Google Apps Script Faculty sheet if configured
   await callGoogleAppsScript('addClassTeacher', {

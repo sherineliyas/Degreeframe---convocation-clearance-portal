@@ -29,6 +29,7 @@ import { api } from '../services/api';
 import { UserManualModal } from './UserManualModal';
 import { FacultyRecord, SubmissionRecord, CoeSettings, CoeOverviewStats } from '../types';
 import { downloadMasterExcelTemplate } from '../utils/excelTemplate';
+import { formatDriveImageUrl } from '../utils/imageUtils';
 
 interface CoeUserInfo {
   email: string;
@@ -541,6 +542,56 @@ export const CoePortal: React.FC = () => {
     }
   };
 
+  // Edit HOD Details
+  const handleEditHod = async (hod: FacultyRecord) => {
+    const newName = window.prompt('Update HOD Full Name / Designation:', hod.name || '');
+    if (newName === null) return;
+    const newEmail = window.prompt('Update HOD Email ID:', hod.email || '');
+    if (newEmail === null) return;
+    const newDept = window.prompt('Update Department / Academic Branch:', hod.department || '');
+    if (newDept === null) return;
+
+    if (!newEmail.trim() || !newName.trim() || !newDept.trim()) {
+      setNotification({ type: 'error', message: 'HOD Name, email, and department cannot be empty.' });
+      return;
+    }
+
+    try {
+      const res = await api.updateHod({
+        oldEmail: hod.email,
+        newEmail: newEmail.trim(),
+        name: newName.trim(),
+        department: newDept.trim(),
+        specialization: hod.specialization || 'ALL',
+      });
+      if (res.success) {
+        setNotification({ type: 'success', message: res.message || 'HOD details updated successfully.' });
+        await loadCoeData();
+      } else {
+        setNotification({ type: 'error', message: res.message || 'Failed to update HOD.' });
+      }
+    } catch {
+      setNotification({ type: 'error', message: 'Error updating HOD.' });
+    }
+  };
+
+  // Remove HOD
+  const handleRemoveHod = async (email: string) => {
+    if (!window.confirm(`Are you sure you want to remove HOD ${email}?`)) return;
+
+    try {
+      const res = await api.deleteHod(email);
+      if (res.success) {
+        setNotification({ type: 'success', message: res.message || `HOD ${email} removed successfully.` });
+        await loadCoeData();
+      } else {
+        setNotification({ type: 'error', message: res.message || 'Failed to remove HOD.' });
+      }
+    } catch {
+      setNotification({ type: 'error', message: 'Error removing HOD.' });
+    }
+  };
+
   // Handle CSV Import
   const handleImportCsv = async () => {
     if (!csvContent.trim()) {
@@ -1005,18 +1056,6 @@ export const CoePortal: React.FC = () => {
           <Users className="w-4 h-4" />
           Submissions Audit ({submissions.length})
         </button>
-
-        <button
-          onClick={() => setActiveTab('acoe')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'acoe'
-              ? 'bg-purple-700 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          ACOE Directory & OTP ({acoeUsersList.length})
-        </button>
       </div>
 
 
@@ -1389,6 +1428,7 @@ export const CoePortal: React.FC = () => {
                       <th className="py-2.5 px-3 font-semibold">Official Email</th>
                       <th className="py-2.5 px-3 font-semibold">Scope</th>
                       <th className="py-2.5 px-3 font-semibold">Status</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">Actions & Controls</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1404,6 +1444,24 @@ export const CoePortal: React.FC = () => {
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
                             Active HOD
                           </span>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleEditHod(h)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all cursor-pointer"
+                            >
+                              Edit Details
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveHod(h.email)}
+                              className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold transition-all cursor-pointer"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1776,9 +1834,13 @@ export const CoePortal: React.FC = () => {
                         <td className="py-2.5 px-3">
                           {sub.finalDriveUrl ? (
                             <img
-                              src={sub.finalDriveUrl}
+                              src={formatDriveImageUrl(sub.finalDriveUrl)}
                               alt={sub.registerNumber}
                               className="w-9 h-11 object-cover rounded-md border border-slate-200 shadow-2xs"
+                              onError={(e: any) => {
+                                e.target.onerror = null;
+                                e.target.src = 'https://via.placeholder.com/150?text=Photo';
+                              }}
                             />
                           ) : (
                             <div className="w-9 h-11 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] text-slate-400">
@@ -1873,9 +1935,13 @@ export const CoePortal: React.FC = () => {
                 </span>
                 {inspectRecord.finalDriveUrl ? (
                   <img
-                    src={inspectRecord.finalDriveUrl}
+                    src={formatDriveImageUrl(inspectRecord.finalDriveUrl)}
                     alt={inspectRecord.studentName}
                     className="w-36 h-44 object-cover rounded-xl border border-slate-200 shadow-md mx-auto"
+                    onError={(e: any) => {
+                      e.target.onerror = null;
+                      e.target.src = 'https://via.placeholder.com/300x400?text=No+Photo';
+                    }}
                   />
                 ) : (
                   <div className="w-36 h-44 bg-slate-100 rounded-xl border border-slate-200 flex items-center justify-center text-xs text-slate-400 mx-auto">

@@ -1123,6 +1123,75 @@ export const api = {
     };
   },
 
+  // COE Update Department HOD
+  async updateHod(payload: { oldEmail: string; newEmail?: string; name?: string; department?: string; specialization?: string }): Promise<ApiResponse> {
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/update-hod'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const cleanOldEmail = payload.oldEmail.toLowerCase().trim();
+    const cleanNewEmail = (payload.newEmail || cleanOldEmail).toLowerCase().trim();
+    const faculty = storage.getFaculty();
+    const idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'HOD');
+
+    if (idx >= 0) {
+      faculty[idx].email = cleanNewEmail;
+      if (payload.name) faculty[idx].name = payload.name.trim();
+      if (payload.department) faculty[idx].department = payload.department.trim().toUpperCase();
+      if (payload.specialization) faculty[idx].specialization = payload.specialization.trim().toUpperCase();
+      storage.saveFaculty(faculty);
+    }
+
+    return {
+      success: true,
+      message: 'HOD record updated.',
+    };
+  },
+
+  // COE Delete / Remove Department HOD
+  async deleteHod(email: string, department?: string): Promise<ApiResponse> {
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanDept = (department || '').trim().toUpperCase();
+
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/delete-hod'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ email: cleanEmail, department: cleanDept }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const faculty = storage.getFaculty().filter(
+      (f) => !(f.role === 'HOD' && (f.email.toLowerCase() === cleanEmail || (cleanDept && f.department.toUpperCase() === cleanDept)))
+    );
+    storage.saveFaculty(faculty);
+
+    return {
+      success: true,
+      message: `HOD record removed.`,
+    };
+  },
+
   // COE Import Sheets
   async importSheets(payload: { students?: any[]; submissions?: any[]; faculty?: any[] }): Promise<ApiResponse> {
     if (canUseExpressApi()) {

@@ -902,7 +902,7 @@ export const CoePortal: React.FC = () => {
           }`}
         >
           <FolderOpen className="w-4 h-4" />
-          Google Drive Storage
+          Drive & Sheet Config
         </button>
 
         <button
@@ -1037,86 +1037,28 @@ export const CoePortal: React.FC = () => {
               </div>
             </div>
           </div>
-
-          {/* Connected Resources Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-2xs">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                  <FolderOpen className="w-4 h-4 text-amber-600" />
-                  Target Google Drive Folder
-                </h4>
-                <a
-                  href={settings.driveFolderUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-purple-700 font-semibold hover:underline flex items-center gap-1"
-                >
-                  Open in Drive <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-              <p className="text-xs text-slate-500 mb-3">
-                All photos submitted by students are saved into the COE-designated Google Drive location:
-              </p>
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 font-mono text-[11px] text-slate-700 break-all">
-                {settings.driveFolderUrl}
-              </div>
-              <div className="mt-3 text-[11px] text-slate-500 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                <span>Auto-routed path: <code className="text-purple-900 font-mono">Photo/Dept/Spec/Section/RegNo.jpg</code></span>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-2xs">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                  Master Google Spreadsheet
-                </h4>
-                <a
-                  href={settings.spreadsheetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-purple-700 font-semibold hover:underline flex items-center gap-1"
-                >
-                  Open Sheet <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-              <p className="text-xs text-slate-500 mb-3">
-                Connected 3-tab Google Spreadsheet architecture:
-              </p>
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 font-mono text-[11px] text-slate-700 break-all">
-                {settings.spreadsheetUrl}
-              </div>
-              <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-600">
-                <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-900 font-mono font-bold">Submissions (22 cols)</span>
-                <span className="px-2 py-0.5 rounded-md bg-slate-200 font-mono">Student_data (9 cols)</span>
-                <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-900 font-mono font-bold">Faculty (8 cols)</span>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* TAB 2: GOOGLE DRIVE STORAGE CONFIGURATION */}
+      {/* TAB 2: GOOGLE DRIVE & MASTER SHEET CONFIGURATION */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'drive' && (
         <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-2xs space-y-6">
           <div>
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <FolderOpen className="w-5 h-5 text-purple-700" />
-              Configure Google Drive Photo Destination
+              Target Google Drive & Master Sheet Configuration
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              The Controller of Examinations specifies the target Google Drive storage folder. All student convocation portrait photos and certificate verification documents will automatically be organized inside this folder.
+              Specify the Master Google Spreadsheet and target Google Drive storage folder for the institution. Student details are fetched directly from the <code className="text-purple-700 font-bold">Student_data</code> tab, uploaded photos are saved as <code className="text-purple-700 font-bold">&lt;RegisterNumber&gt;.jpg</code> in the Google Drive folder, and submission records and faculty appointments are saved in the <code className="text-purple-700 font-bold">Submissions</code> and <code className="text-purple-700 font-bold">Faculty</code> tabs.
             </p>
           </div>
 
           <form onSubmit={handleSaveConfig} className="space-y-4 max-w-2xl">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Target Google Drive Folder URL or Folder ID
+                Target Google Drive Storage Folder URL or Folder ID *
               </label>
               <input
                 type="text"
@@ -1127,23 +1069,24 @@ export const CoePortal: React.FC = () => {
                 required
               />
               <p className="text-[11px] text-slate-400 mt-1">
-                Make sure the Google Drive folder permissions are set to allow write access for the university service account or drive owner.
+                All student passport portrait photographs will be uploaded directly as <code className="text-purple-700 font-bold">&lt;RegisterNumber&gt;.jpg</code> inside this destination Google Drive folder.
               </p>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Google Apps Script Web App URL <span className="text-slate-400 font-normal">(Optional — Leave blank if set via Render GOOGLE_SCRIPT_URL)</span>
+                Master Google Spreadsheet URL or Spreadsheet ID *
               </label>
               <input
                 type="text"
-                value={scriptUrlInput}
-                onChange={(e) => setScriptUrlInput(e.target.value)}
-                placeholder="Optional: https://script.google.com/macros/s/AKfycb.../exec"
+                value={sheetUrlInput}
+                onChange={(e) => setSheetUrlInput(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit"
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                required
               />
               <p className="text-[11px] text-slate-400 mt-1">
-                Optional override. Deploying <code className="text-purple-700">Code.gs</code> is done only once—changing the Google Drive Folder URL above automatically routes new <code className="text-purple-700">&lt;RegNo&gt;.jpg</code> uploads to the new Drive folder without redeploying Apps Script.
+                Connected 3-tab Google Sheet: <code className="text-purple-700 font-bold">Student_data</code> (auto-read profiles), <code className="text-purple-700 font-bold">Submissions</code> (live submissions), and <code className="text-purple-700 font-bold">Faculty</code> (HOD & Teacher directory).
               </p>
             </div>
 
@@ -1175,7 +1118,7 @@ export const CoePortal: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2 flex items-center gap-3">
+            <div className="pt-2 flex flex-wrap items-center gap-3">
               <button
                 type="submit"
                 disabled={isSavingConfig}
@@ -1184,12 +1127,12 @@ export const CoePortal: React.FC = () => {
                 {isSavingConfig ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Updating Storage Config...
+                    Saving Drive & Sheet Config...
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    Save Drive Folder Settings
+                    Save Drive & Sheet Settings
                   </>
                 )}
               </button>
@@ -1205,20 +1148,32 @@ export const CoePortal: React.FC = () => {
                   Open Live Drive Folder
                 </a>
               )}
+
+              {settings.spreadsheetUrl && (
+                <a
+                  href={settings.spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2.5 rounded-xl border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-4 h-4 text-purple-700" />
+                  Open Live Google Sheet
+                </a>
+              )}
             </div>
           </form>
 
-          {/* Folder Structure Preview */}
-          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs text-slate-600 max-w-2xl space-y-2">
-            <span className="font-bold text-slate-800 block">Google Drive Storage Structure:</span>
-            <div className="font-mono text-[11px] space-y-1 text-slate-700">
-              <div>📁 Drive Destination Folder [ID: <code className="text-purple-700 font-bold">{settings.driveFolderId || 'COE_FOLDER_ID'}</code>]</div>
-              <div className="pl-4">└── 🖼️ 20134001.jpg (Direct passport photo, Clean &lt; 80KB)</div>
-              <div className="pl-4">└── 🖼️ 20134002.jpg</div>
+          {/* Folder & Sheet Architecture Summary */}
+          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs text-slate-600 max-w-2xl space-y-3">
+            <span className="font-bold text-slate-800 block">System Connection Architecture:</span>
+            <div className="font-mono text-[11px] space-y-1.5 text-slate-700">
+              <div>📁 <strong>Target Google Drive Folder:</strong> <code className="text-purple-700 font-bold">{settings.driveFolderId || '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI'}</code></div>
+              <div className="pl-4 text-slate-500">└── 🖼️ &lt;RegisterNumber&gt;.jpg (Saved directly without subfolders)</div>
+              <div className="pt-1">📊 <strong>Master Google Spreadsheet:</strong> <code className="text-purple-700 font-bold">{settings.spreadsheetId || '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ'}</code></div>
+              <div className="pl-4 text-slate-500">├── 📄 <strong>Student_data</strong> (9 cols: RegNo, Name, Father Name, DOB, Gender, etc.)</div>
+              <div className="pl-4 text-slate-500">├── 📄 <strong>Submissions</strong> (22 cols: Submissions, Drive URLs, Approval Status)</div>
+              <div className="pl-4 text-slate-500">└── 📄 <strong>Faculty</strong> (8 cols: ACOEs, HODs, and Class Teachers)</div>
             </div>
-            <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-200">
-              Photos are saved directly as <code className="text-purple-700 font-bold">&lt;RegisterNumber&gt;.jpg</code> inside the target Drive folder. No subfolders or proof files required.
-            </p>
           </div>
         </div>
       )}

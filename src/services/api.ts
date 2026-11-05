@@ -14,6 +14,7 @@ export interface ApiResponse<T = any> {
   user?: any;
   coeUser?: any;
   users?: any[];
+  assignedTeachers?: FacultyRecord[];
 }
 
 
@@ -686,6 +687,85 @@ export const api = {
     return {
       success: true,
       message: `Class Teacher ${payload.teacherName} added successfully.`,
+    };
+  },
+
+  // Update Class Teacher (HOD Action)
+  async updateClassTeacher(payload: {
+    hodEmail: string;
+    oldEmail: string;
+    newEmail?: string;
+    name?: string;
+    department?: string;
+    specialization?: string;
+    semester?: string;
+    batch?: string;
+    section?: string;
+  }): Promise<ApiResponse> {
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/faculty/update-teacher'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const cleanOldEmail = payload.oldEmail.toLowerCase().trim();
+    const cleanNewEmail = (payload.newEmail || cleanOldEmail).toLowerCase().trim();
+    const faculty = storage.getFaculty();
+    const idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'TEACHER');
+
+    if (idx >= 0) {
+      faculty[idx].email = cleanNewEmail;
+      if (payload.name) faculty[idx].name = payload.name.trim();
+      if (payload.department) faculty[idx].department = payload.department.trim().toUpperCase();
+      if (payload.specialization) faculty[idx].specialization = payload.specialization.trim().toUpperCase();
+      if (payload.semester) faculty[idx].semester = payload.semester.trim().toUpperCase();
+      if (payload.batch) faculty[idx].batch = payload.batch.trim();
+      if (payload.section) faculty[idx].section = payload.section.trim().toUpperCase();
+      storage.saveFaculty(faculty);
+    }
+
+    return {
+      success: true,
+      message: 'Class Teacher record updated.',
+    };
+  },
+
+  // Delete / Remove Class Teacher (HOD Action)
+  async deleteClassTeacher(hodEmail: string, teacherEmail: string): Promise<ApiResponse> {
+    const cleanEmail = teacherEmail.toLowerCase().trim();
+
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/faculty/delete-teacher'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ hodEmail, teacherEmail: cleanEmail }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          return await response.json();
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const faculty = storage.getFaculty().filter((f) => !(f.role === 'TEACHER' && f.email.toLowerCase() === cleanEmail));
+    storage.saveFaculty(faculty);
+
+    return {
+      success: true,
+      message: `Class Teacher ${cleanEmail} removed.`,
     };
   },
 

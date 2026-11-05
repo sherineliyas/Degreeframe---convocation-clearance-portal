@@ -126,6 +126,56 @@ export const FacultyPortal: React.FC = () => {
     setApplications([]);
   };
 
+  // Assigned Class Teachers for HOD
+  const [assignedTeachers, setAssignedTeachers] = useState<FacultyRecord[]>([]);
+  const [editingTeacherEmail, setEditingTeacherEmail] = useState<string | null>(null);
+
+  const handleOpenAddTeacherModal = () => {
+    setEditingTeacherEmail(null);
+    setNewTeacherData({
+      email: '',
+      name: '',
+      specialization: 'ALL',
+      semester: 'VIII',
+      batch: 'Batch A',
+      section: 'A',
+    });
+    setAddTeacherMsg(null);
+    setIsAddTeacherOpen(true);
+  };
+
+  const handleEditTeacherModal = (teacher: FacultyRecord) => {
+    setEditingTeacherEmail(teacher.email);
+    setNewTeacherData({
+      email: teacher.email || '',
+      name: teacher.name || '',
+      specialization: teacher.specialization || 'ALL',
+      semester: teacher.semester || 'VIII',
+      batch: teacher.batch || 'Batch A',
+      section: teacher.section || 'A',
+    });
+    setAddTeacherMsg(null);
+    setIsAddTeacherOpen(true);
+  };
+
+  const handleDeleteTeacher = async (teacherEmail: string) => {
+    if (!currentFaculty || currentFaculty.role !== 'HOD') return;
+    if (!window.confirm(`Are you sure you want to remove Class Teacher ${teacherEmail}?`)) return;
+
+    try {
+      const res = await api.deleteClassTeacher(currentFaculty.email, teacherEmail);
+      if (res.success) {
+        setActionSuccessMsg(res.message || `Class Teacher ${teacherEmail} removed successfully.`);
+        setTimeout(() => setActionSuccessMsg(null), 4000);
+        loadApplications();
+      } else {
+        alert(res.message || 'Failed to remove class teacher.');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error removing class teacher.');
+    }
+  };
+
   // 3. Load Pending Applications
   const loadApplications = async (facEmail?: string) => {
     const targetEmail = facEmail || currentFaculty?.email;
@@ -136,6 +186,17 @@ export const FacultyPortal: React.FC = () => {
       const res = await api.getPendingApplications(targetEmail);
       if (res.success && Array.isArray(res.data)) {
         setApplications(res.data);
+      }
+      if (res.assignedTeachers) {
+        setAssignedTeachers(res.assignedTeachers);
+      } else {
+        const targetDept = (res.faculty?.department || currentFaculty?.department || '').toUpperCase();
+        if (targetDept) {
+          const localTeachers = storage.getFaculty().filter(
+            (f) => f.role === 'TEACHER' && f.department.toUpperCase() === targetDept
+          );
+          setAssignedTeachers(localTeachers);
+        }
       }
     } catch (e) {
       console.error('Error fetching applications:', e);
@@ -177,7 +238,7 @@ export const FacultyPortal: React.FC = () => {
     }
   };
 
-  // 5. HOD Add Class Teacher
+  // 5. HOD Add / Update Class Teacher
   const handleAddTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentFaculty || currentFaculty.role !== 'HOD') return;
@@ -191,19 +252,38 @@ export const FacultyPortal: React.FC = () => {
     setAddTeacherMsg(null);
 
     try {
-      const res = await api.addClassTeacher({
-        hodEmail: currentFaculty.email,
-        teacherEmail: newTeacherData.email,
-        teacherName: newTeacherData.name,
-        department: currentFaculty.department,
-        specialization: newTeacherData.specialization,
-        semester: newTeacherData.semester,
-        batch: newTeacherData.batch,
-        section: newTeacherData.section,
-      });
+      let res;
+      if (editingTeacherEmail) {
+        res = await api.updateClassTeacher({
+          hodEmail: currentFaculty.email,
+          oldEmail: editingTeacherEmail,
+          newEmail: newTeacherData.email,
+          name: newTeacherData.name,
+          department: currentFaculty.department,
+          specialization: newTeacherData.specialization,
+          semester: newTeacherData.semester,
+          batch: newTeacherData.batch,
+          section: newTeacherData.section,
+        });
+      } else {
+        res = await api.addClassTeacher({
+          hodEmail: currentFaculty.email,
+          teacherEmail: newTeacherData.email,
+          teacherName: newTeacherData.name,
+          department: currentFaculty.department,
+          specialization: newTeacherData.specialization,
+          semester: newTeacherData.semester,
+          batch: newTeacherData.batch,
+          section: newTeacherData.section,
+        });
+      }
 
       if (res.success) {
-        setAddTeacherMsg({ text: res.message || 'Class Teacher assigned successfully!', type: 'success' });
+        setAddTeacherMsg({
+          text: res.message || (editingTeacherEmail ? 'Class Teacher updated successfully!' : 'Class Teacher assigned successfully!'),
+          type: 'success',
+        });
+        setEditingTeacherEmail(null);
         setNewTeacherData({
           email: '',
           name: '',
@@ -212,15 +292,16 @@ export const FacultyPortal: React.FC = () => {
           batch: 'Batch A',
           section: 'A',
         });
+        await loadApplications();
         setTimeout(() => {
           setIsAddTeacherOpen(false);
           setAddTeacherMsg(null);
-        }, 1800);
+        }, 1200);
       } else {
-        setAddTeacherMsg({ text: res.message || 'Failed to add teacher', type: 'error' });
+        setAddTeacherMsg({ text: res.message || 'Failed to save teacher', type: 'error' });
       }
     } catch (e: any) {
-      setAddTeacherMsg({ text: e.message || 'Error assigning teacher', type: 'error' });
+      setAddTeacherMsg({ text: e.message || 'Error saving teacher', type: 'error' });
     } finally {
       setAddTeacherLoading(false);
     }
@@ -359,8 +440,8 @@ export const FacultyPortal: React.FC = () => {
                 </button>
                 {currentFaculty.role === 'HOD' && (
                   <button
-                    onClick={() => setIsAddTeacherOpen(true)}
-                    className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-amber-950 font-semibold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                    onClick={handleOpenAddTeacherModal}
+                    className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-amber-950 font-semibold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
                     <UserPlus className="w-3.5 h-3.5" /> Assign Class Teacher
                   </button>
@@ -412,6 +493,82 @@ export const FacultyPortal: React.FC = () => {
               >
                 <X className="w-4 h-4" />
               </button>
+            </div>
+          )}
+
+          {/* HOD Appointed Class Teachers Directory */}
+          {currentFaculty.role === 'HOD' && (
+            <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xs p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <UserPlus className="w-4.5 h-4.5 text-amber-600" />
+                    Appointed Class Teachers Directory ({assignedTeachers.length})
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Class teachers appointed for section-level student verification in {currentFaculty.department}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenAddTeacherModal}
+                  className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-amber-950 font-bold text-xs rounded-xl shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer self-start"
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> Assign New Teacher
+                </button>
+              </div>
+
+              {assignedTeachers.length === 0 ? (
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center text-xs text-slate-500">
+                  No class teachers currently assigned for {currentFaculty.department}. Click "Assign New Teacher" above.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 bg-slate-50/60">
+                        <th className="py-2.5 px-3 font-semibold">Teacher Name</th>
+                        <th className="py-2.5 px-3 font-semibold">Official Email</th>
+                        <th className="py-2.5 px-3 font-semibold">Sem & Sec</th>
+                        <th className="py-2.5 px-3 font-semibold">Shift / Batch</th>
+                        <th className="py-2.5 px-3 font-semibold">Specialization</th>
+                        <th className="py-2.5 px-3 font-semibold text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {assignedTeachers.map((t) => (
+                        <tr key={t.email} className="hover:bg-slate-50/70">
+                          <td className="py-2.5 px-3 font-bold text-slate-900">{t.name}</td>
+                          <td className="py-2.5 px-3 font-mono font-medium text-slate-700 text-[11px]">{t.email}</td>
+                          <td className="py-2.5 px-3 font-semibold text-blue-700">
+                            Sem {t.semester || 'VIII'} • Sec {t.section || 'A'}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">{t.batch || 'Batch A'}</td>
+                          <td className="py-2.5 px-3 text-slate-600">{t.specialization || 'ALL'}</td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleEditTeacherModal(t)}
+                                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer transition-colors"
+                              >
+                                Edit Details
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTeacher(t.email)}
+                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold cursor-pointer transition-colors"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -683,7 +840,9 @@ export const FacultyPortal: React.FC = () => {
             <div className="bg-amber-400 text-amber-950 px-5 py-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5" />
-                <h4 className="font-bold text-sm">Assign Class Teacher</h4>
+                <h4 className="font-bold text-sm">
+                  {editingTeacherEmail ? 'Edit Class Teacher Details' : 'Assign Class Teacher'}
+                </h4>
               </div>
               <button
                 onClick={() => setIsAddTeacherOpen(false)}
@@ -817,9 +976,13 @@ export const FacultyPortal: React.FC = () => {
                 <button
                   type="submit"
                   disabled={addTeacherLoading}
-                  className="px-5 py-2 bg-amber-400 hover:bg-amber-300 text-amber-950 font-bold rounded-xl shadow-xs"
+                  className="px-5 py-2 bg-amber-400 hover:bg-amber-300 text-amber-950 font-bold rounded-xl shadow-xs cursor-pointer"
                 >
-                  {addTeacherLoading ? 'Saving...' : 'Save Teacher'}
+                  {addTeacherLoading
+                    ? 'Saving...'
+                    : editingTeacherEmail
+                    ? 'Save Teacher Details'
+                    : 'Save Teacher'}
                 </button>
               </div>
             </form>

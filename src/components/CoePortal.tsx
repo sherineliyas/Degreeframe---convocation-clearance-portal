@@ -501,8 +501,10 @@ export const CoePortal: React.FC = () => {
     }
   };
 
-  // Handle Add HOD
-  const handleAddHod = async (e: React.FormEvent) => {
+  const [editingHodEmail, setEditingHodEmail] = useState<string | null>(null);
+
+  // Handle Save / Update HOD
+  const handleSaveHod = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hodForm.name.trim() || !hodForm.email.trim() || !hodForm.department.trim()) {
       setNotification({ type: 'error', message: 'Name, official email, and department are required.' });
@@ -513,18 +515,32 @@ export const CoePortal: React.FC = () => {
     setNotification(null);
 
     try {
-      const res = await api.addHod({
-        name: hodForm.name.trim(),
-        email: hodForm.email.trim(),
-        department: hodForm.department.trim(),
-        specialization: hodForm.specialization.trim() || 'ALL',
-      });
+      let res;
+      if (editingHodEmail) {
+        res = await api.updateHod({
+          oldEmail: editingHodEmail,
+          newEmail: hodForm.email.trim(),
+          name: hodForm.name.trim(),
+          department: hodForm.department.trim(),
+          specialization: hodForm.specialization.trim() || 'ALL',
+        });
+      } else {
+        res = await api.addHod({
+          name: hodForm.name.trim(),
+          email: hodForm.email.trim(),
+          department: hodForm.department.trim(),
+          specialization: hodForm.specialization.trim() || 'ALL',
+        });
+      }
 
       if (res.success) {
         setNotification({
           type: 'success',
-          message: `Head of Department for ${hodForm.department} assigned successfully.`,
+          message: editingHodEmail
+            ? `HOD details for ${hodForm.department} updated successfully.`
+            : `Head of Department for ${hodForm.department} assigned successfully.`,
         });
+        setEditingHodEmail(null);
         setHodForm({
           name: '',
           email: '',
@@ -533,7 +549,7 @@ export const CoePortal: React.FC = () => {
         });
         await loadCoeData();
       } else {
-        setNotification({ type: 'error', message: res.message || 'Failed to assign HOD.' });
+        setNotification({ type: 'error', message: res.message || 'Failed to save HOD details.' });
       }
     } catch {
       setNotification({ type: 'error', message: 'Error submitting HOD details.' });
@@ -542,37 +558,27 @@ export const CoePortal: React.FC = () => {
     }
   };
 
-  // Edit HOD Details
-  const handleEditHod = async (hod: FacultyRecord) => {
-    const newName = window.prompt('Update HOD Full Name / Designation:', hod.name || '');
-    if (newName === null) return;
-    const newEmail = window.prompt('Update HOD Email ID:', hod.email || '');
-    if (newEmail === null) return;
-    const newDept = window.prompt('Update Department / Academic Branch:', hod.department || '');
-    if (newDept === null) return;
+  // Edit HOD Details (Populates UI Form)
+  const handleEditHod = (hod: FacultyRecord) => {
+    setEditingHodEmail(hod.email);
+    setHodForm({
+      name: hod.name || '',
+      email: hod.email || '',
+      department: hod.department || 'AERONAUTICAL ENGINEERING',
+      specialization: hod.specialization || 'ALL',
+    });
+    window.scrollTo({ top: 350, behavior: 'smooth' });
+  };
 
-    if (!newEmail.trim() || !newName.trim() || !newDept.trim()) {
-      setNotification({ type: 'error', message: 'HOD Name, email, and department cannot be empty.' });
-      return;
-    }
-
-    try {
-      const res = await api.updateHod({
-        oldEmail: hod.email,
-        newEmail: newEmail.trim(),
-        name: newName.trim(),
-        department: newDept.trim(),
-        specialization: hod.specialization || 'ALL',
-      });
-      if (res.success) {
-        setNotification({ type: 'success', message: res.message || 'HOD details updated successfully.' });
-        await loadCoeData();
-      } else {
-        setNotification({ type: 'error', message: res.message || 'Failed to update HOD.' });
-      }
-    } catch {
-      setNotification({ type: 'error', message: 'Error updating HOD.' });
-    }
+  // Cancel Edit Mode
+  const handleCancelHodEdit = () => {
+    setEditingHodEmail(null);
+    setHodForm({
+      name: '',
+      email: '',
+      department: 'AERONAUTICAL ENGINEERING',
+      specialization: 'ALL',
+    });
   };
 
   // Remove HOD
@@ -1311,14 +1317,14 @@ export const CoePortal: React.FC = () => {
             <div className="mb-6">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-purple-700" />
-                Appoint Department HOD Details
+                {editingHodEmail ? 'Edit Department HOD Details' : 'Appoint Department HOD Details'}
               </h3>
               <p className="text-xs text-slate-500 mt-1">
                 The COE assigns the Head of Department (HOD) for each academic branch. The appointed HOD will gain authorization to appoint Class Teachers and approve convocation submissions for their department.
               </p>
             </div>
 
-            <form onSubmit={handleAddHod} className="space-y-4 max-w-2xl">
+            <form onSubmit={handleSaveHod} className="space-y-4 max-w-2xl">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -1387,23 +1393,35 @@ export const CoePortal: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                disabled={isAddingHod}
-                className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-60 cursor-pointer"
-              >
-                {isAddingHod ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Assigning HOD in Database...
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4" />
-                    Appoint Head of Department
-                  </>
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={isAddingHod}
+                  className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-60 cursor-pointer"
+                >
+                  {isAddingHod ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      {editingHodEmail ? 'Saving HOD Updates...' : 'Assigning HOD in Database...'}
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      {editingHodEmail ? 'Save HOD Details' : 'Appoint Head of Department'}
+                    </>
+                  )}
+                </button>
+
+                {editingHodEmail && (
+                  <button
+                    type="button"
+                    onClick={handleCancelHodEdit}
+                    className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-semibold transition-all cursor-pointer"
+                  >
+                    Cancel Edit
+                  </button>
                 )}
-              </button>
+              </div>
             </form>
           </div>
 

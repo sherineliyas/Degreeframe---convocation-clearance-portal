@@ -1666,10 +1666,15 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
     return false;
   });
 
+  const assignedTeachers = facultyData.filter(
+    (f) => f.role === 'TEACHER' && f.department.toUpperCase() === dept
+  );
+
   return res.json({
     success: true,
     data: filtered,
     faculty,
+    assignedTeachers,
   });
 });
 
@@ -1721,8 +1726,9 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
     return res.status(403).json({ success: false, message: 'Only authorized Department HOD can assign class teachers.' });
   }
 
+  const cleanEmail = String(teacherEmail).toLowerCase().trim();
   const newTeacher: FacultyRecord = {
-    email: String(teacherEmail).toLowerCase().trim(),
+    email: cleanEmail,
     name: String(teacherName).trim(),
     role: 'TEACHER',
     department: department || hod.department,
@@ -1732,7 +1738,12 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
     section: String(section || 'A').toUpperCase().trim(),
   };
 
-  facultyData.push(newTeacher);
+  const existingIdx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanEmail);
+  if (existingIdx !== -1) {
+    facultyData[existingIdx] = newTeacher;
+  } else {
+    facultyData.push(newTeacher);
+  }
   saveFacultyToDisk();
 
   // Sync to Google Apps Script Faculty sheet if configured
@@ -1751,6 +1762,81 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
     success: true,
     message: `Class Teacher ${newTeacher.name} assigned for Sem ${newTeacher.semester} Sec ${newTeacher.section} (${newTeacher.batch}).`,
     teacher: newTeacher,
+  });
+});
+
+// HOD Update Class Teacher Details
+app.post('/api/faculty/update-teacher', async (req: Request, res: Response) => {
+  const { hodEmail, oldEmail, newEmail, name, department, specialization, semester, batch, section } = req.body;
+
+  const hod = facultyData.find((f) => f.email.toLowerCase() === String(hodEmail).toLowerCase() && f.role === 'HOD');
+  if (!hod) {
+    return res.status(403).json({ success: false, message: 'Only authorized Department HOD can update class teachers.' });
+  }
+
+  const cleanOldEmail = String(oldEmail).toLowerCase().trim();
+  const cleanNewEmail = String(newEmail || oldEmail).toLowerCase().trim();
+  const idx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'TEACHER');
+
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: 'Class Teacher record not found.' });
+  }
+
+  facultyData[idx] = {
+    ...facultyData[idx],
+    email: cleanNewEmail,
+    name: name ? String(name).trim() : facultyData[idx].name,
+    department: department ? String(department).trim() : facultyData[idx].department,
+    specialization: specialization ? String(specialization).trim() : facultyData[idx].specialization,
+    semester: semester ? String(semester).trim().toUpperCase() : facultyData[idx].semester,
+    batch: batch ? String(batch).trim() : facultyData[idx].batch,
+    section: section ? String(section).trim().toUpperCase() : facultyData[idx].section,
+  };
+
+  saveFacultyToDisk();
+
+  await callGoogleAppsScript('updateClassTeacher', {
+    oldEmail: cleanOldEmail,
+    newEmail: cleanNewEmail,
+    name: facultyData[idx].name,
+    department: facultyData[idx].department,
+    specialization: facultyData[idx].specialization,
+    semester: facultyData[idx].semester,
+    section: facultyData[idx].section,
+    batch: facultyData[idx].batch,
+  });
+
+  return res.json({
+    success: true,
+    message: `Class Teacher ${facultyData[idx].name} updated successfully.`,
+    teacher: facultyData[idx],
+  });
+});
+
+// HOD Delete Class Teacher
+app.post('/api/faculty/delete-teacher', async (req: Request, res: Response) => {
+  const { hodEmail, teacherEmail } = req.body;
+
+  const hod = facultyData.find((f) => f.email.toLowerCase() === String(hodEmail).toLowerCase() && f.role === 'HOD');
+  if (!hod) {
+    return res.status(403).json({ success: false, message: 'Only authorized Department HOD can remove class teachers.' });
+  }
+
+  const cleanEmail = String(teacherEmail).toLowerCase().trim();
+  const idx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanEmail && f.role === 'TEACHER');
+
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: 'Class Teacher record not found.' });
+  }
+
+  const removed = facultyData.splice(idx, 1)[0];
+  saveFacultyToDisk();
+
+  await callGoogleAppsScript('deleteClassTeacher', { teacherEmail: removed.email });
+
+  return res.json({
+    success: true,
+    message: `Class Teacher ${removed.name} removed successfully.`,
   });
 });
 

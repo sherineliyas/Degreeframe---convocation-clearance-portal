@@ -15,10 +15,6 @@ import { ApprovalStatus } from '../types';
 export interface StepProgressProps {
   currentStep: 1 | 2 | 3 | 4;
   onStepClick?: (step: 1 | 2 | 3) => void;
-  requires10thProof: boolean;
-  has10thProof: boolean;
-  requiresTcProof: boolean;
-  hasTcProof: boolean;
   hasPhoto: boolean;
   photoSizeKb: number;
   isConfirmed: boolean;
@@ -27,17 +23,13 @@ export interface StepProgressProps {
 export const StepProgressIndicator: React.FC<StepProgressProps> = ({
   currentStep,
   onStepClick,
-  requires10thProof,
-  has10thProof,
-  requiresTcProof,
-  hasTcProof,
   hasPhoto,
   photoSizeKb,
   isConfirmed,
 }) => {
   const steps = [
     { number: 1, label: 'Profile Lookup', sub: 'Enrollment Record', icon: Search },
-    { number: 2, label: 'Verify Details', sub: 'Certificates & Proofs', icon: FileText },
+    { number: 2, label: 'Verify Particulars', sub: 'Name & Department', icon: FileText },
     { number: 3, label: 'Degree Photo', sub: '35x40mm (< 80KB)', icon: Camera },
   ];
 
@@ -112,43 +104,8 @@ export const StepProgressIndicator: React.FC<StepProgressProps> = ({
         </div>
       </div>
 
-      {/* Photo and Mandatory Document Checklist Badges */}
+      {/* Photo Checklist Badge */}
       <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
-        {/* 10th Proof Badge - only shown if name edited */}
-        {requires10thProof && (
-          <span
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 border ${
-              has10thProof
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                : 'bg-amber-50 text-amber-800 border-amber-300'
-            }`}
-          >
-            {has10thProof ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            ) : (
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
-            )}
-            <span>10th Marksheet: {has10thProof ? 'Attached' : 'Required for Name Edit'}</span>
-          </span>
-        )}
-
-        {/* TC Proof Badge - only shown if profile details edited */}
-        {requiresTcProof && (
-          <span
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 border ${
-              hasTcProof
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                : 'bg-amber-50 text-amber-800 border-amber-300'
-            }`}
-          >
-            {hasTcProof ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            ) : (
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
-            )}
-            <span>TC Proof: {hasTcProof ? 'Attached' : 'Required for Profile Edit'}</span>
-          </span>
-        )}
 
         {/* Photo Status Badge */}
         <span

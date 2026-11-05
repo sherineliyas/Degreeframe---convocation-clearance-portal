@@ -1328,7 +1328,7 @@ app.post('/api/student/submit', async (req: Request, res: Response) => {
   let savedProof10thUrl = proof10thData || '';
   let savedProofTcUrl = proofTcData || '';
 
-  // Forward to Google Apps Script (Code.gs) to save .jpg in Google Drive folder & row in Google Sheet
+  // Forward to Google Apps Script (Code.gs) to save .jpg directly in Google Drive folder & row in Submissions Sheet
   const gasResult = await callGoogleAppsScript('submitStudentApplication', {
     registerNumber: regNo,
     studentEmail: String(studentEmail || '').trim().toLowerCase(),
@@ -1343,10 +1343,6 @@ app.post('/api/student/submit', async (req: Request, res: Response) => {
     section: String(section || 'A').trim().toUpperCase(),
     batch: String(batch || 'Batch A').trim(),
     photoData: rawPhotoBase64,
-    proof10thData: proof10thData && proof10thData.includes('base64,') ? proof10thData.split('base64,')[1] : (proof10thData || ''),
-    proof10thMime: proof10thMime || 'application/pdf',
-    proofTcData: proofTcData && proofTcData.includes('base64,') ? proofTcData.split('base64,')[1] : (proofTcData || ''),
-    proofTcMime: proofTcMime || 'application/pdf',
     isNameCorrected: Boolean(isNameCorrected),
     isFatherCorrected: Boolean(isFatherCorrected),
     isGenderCorrected: Boolean(isGenderCorrected),
@@ -1363,8 +1359,6 @@ app.post('/api/student/submit', async (req: Request, res: Response) => {
     }
     if (gasResult.trackingId) submissionId = gasResult.trackingId;
     if (gasResult.driveUrl) savedDrivePhotoUrl = gasResult.driveUrl;
-    if (gasResult.proof10thUrl !== undefined) savedProof10thUrl = gasResult.proof10thUrl;
-    if (gasResult.proofTcUrl !== undefined) savedProofTcUrl = gasResult.proofTcUrl;
   }
 
   const newSubmission: SubmissionRecord = {
@@ -1383,8 +1377,8 @@ app.post('/api/student/submit', async (req: Request, res: Response) => {
     batch: String(batch || 'Batch A').trim(),
     photoUpload: `${regNo}.jpg`,
     finalDriveUrl: savedDrivePhotoUrl,
-    proof10thUrl: savedProof10thUrl,
-    proofTcUrl: savedProofTcUrl,
+    proof10thUrl: '',
+    proofTcUrl: '',
     validationNotes,
     approvalStatus: 'PENDING_TEACHER',
     submittedAt: new Date().toISOString(),
@@ -1423,9 +1417,18 @@ app.get('/api/student/status/:query', async (req: Request, res: Response) => {
   );
 
   if (found) {
+    const status = found.approvalStatus || 'PENDING_TEACHER';
     return res.json({
       success: true,
-      data: found,
+      data: {
+        ...found,
+        status,
+        approvalStatus: status,
+        regNo: found.registerNumber,
+        name: found.studentName,
+        dept: found.departmentBranch,
+        valStatus: found.validationNotes || 'Verified without edits',
+      },
     });
   }
 

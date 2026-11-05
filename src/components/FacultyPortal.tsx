@@ -539,29 +539,6 @@ export const FacultyPortal: React.FC = () => {
                         </span>
                       </div>
 
-                      {/* Attached Proofs buttons */}
-                      {(app.proof10thUrl || app.proofTcUrl) && (
-                        <div className="flex items-center gap-2 pt-1">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase">Proofs:</span>
-                          {app.proof10thUrl && (
-                            <button
-                              onClick={() => setPreviewMedia({ type: 'proof10th', student: app })}
-                              className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 text-xs font-semibold transition-colors flex items-center gap-1"
-                            >
-                              <FileText className="w-3.5 h-3.5" /> 10th Marksheet Proof
-                            </button>
-                          )}
-                          {app.proofTcUrl && (
-                            <button
-                              onClick={() => setPreviewMedia({ type: 'proofTc', student: app })}
-                              className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg border border-purple-200 text-xs font-semibold transition-colors flex items-center gap-1"
-                            >
-                              <FileText className="w-3.5 h-3.5" /> Transfer Certificate (TC)
-                            </button>
-                          )}
-                        </div>
-                      )}
-
                       {/* Previous Teacher remarks if HOD */}
                       {currentFaculty.role === 'HOD' && app.teacherRemarks && (
                         <div className="p-2 bg-emerald-50/70 border border-emerald-200 rounded-lg text-[11px] text-emerald-900">

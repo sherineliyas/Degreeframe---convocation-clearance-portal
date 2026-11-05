@@ -143,9 +143,7 @@ export const StudentPortal: React.FC = () => {
     confirmed: false,
   });
 
-  // Proofs & Photo
-  const [proof10thFile, setProof10thFile] = useState<{ name: string; data: string; mime: string } | null>(null);
-  const [proofTcFile, setProofTcFile] = useState<{ name: string; data: string; mime: string } | null>(null);
+  // Photo state
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [photoSizeKb, setPhotoSizeKb] = useState<number>(0);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -169,11 +167,6 @@ export const StudentPortal: React.FC = () => {
   const isDobCorrected = originalData && formData.dob.trim() !== originalData.dob.trim();
   const isNationalityCorrected =
     originalData && formData.nationality.trim().toLowerCase() !== originalData.nationality.trim().toLowerCase();
-
-  const requires10thProof = Boolean(isNameCorrected);
-  const requiresTcProof = Boolean(
-    isFatherCorrected || isGenderCorrected || isDobCorrected || isNationalityCorrected
-  );
 
   // 1. Send OTP
   const handleSendOtp = async () => {
@@ -258,7 +251,15 @@ export const StudentPortal: React.FC = () => {
     try {
       const res = await api.getStudentData(targetReg);
       if (res.success && res.alreadySubmitted) {
-        setAlreadySubmittedInfo(res.data);
+        const d = res.data || {};
+        const status = d.status || d.approvalStatus || 'PENDING_TEACHER';
+        setAlreadySubmittedInfo({
+          ...d,
+          status,
+          approvalStatus: status,
+          regNo: d.regNo || d.registerNumber || targetReg,
+          name: d.name || d.studentName || '',
+        });
       } else if (res.success && res.data) {
         const d = res.data;
         const studentObj: StudentRecord = {
@@ -390,14 +391,6 @@ export const StudentPortal: React.FC = () => {
       alert('Please enter your Section.');
       return;
     }
-    if (requires10thProof && !proof10thFile) {
-      alert('10th Marksheet Proof Document is required because your Name was edited.');
-      return;
-    }
-    if (requiresTcProof && !proofTcFile) {
-      alert('Transfer Certificate (TC) Proof Document is required for the profile corrections made.');
-      return;
-    }
     setStep(3);
   };
 
@@ -436,10 +429,6 @@ export const StudentPortal: React.FC = () => {
         isNationalityCorrected,
 
         photoData: photoDataUrl,
-        proof10thData: proof10thFile?.data || '',
-        proof10thMime: proof10thFile?.mime || '',
-        proofTcData: proofTcFile?.data || '',
-        proofTcMime: proofTcFile?.mime || '',
       };
 
       const res = await api.submitApplication(payload);
@@ -470,7 +459,18 @@ export const StudentPortal: React.FC = () => {
     try {
       const res = await api.checkStatus(q);
       if (res.success && res.data) {
-        setTrackResult(res.data);
+        const item = res.data;
+        const status = item.status || item.approvalStatus || 'PENDING_TEACHER';
+        setTrackResult({
+          ...item,
+          status,
+          approvalStatus: status,
+          regNo: item.regNo || item.registerNumber || q,
+          name: item.name || item.studentName || '',
+          dept: item.dept || item.departmentBranch || '',
+          departmentBranch: item.departmentBranch || item.dept || '',
+          valStatus: item.valStatus || item.validationNotes || 'Verified without edits',
+        });
       } else {
         setTrackError(res.message || `No application found for '${q}'`);
       }
@@ -655,10 +655,6 @@ export const StudentPortal: React.FC = () => {
               <StepProgressIndicator
                 currentStep={step}
                 onStepClick={(targetStep) => setStep(targetStep)}
-                requires10thProof={requires10thProof}
-                has10thProof={Boolean(proof10thFile)}
-                requiresTcProof={requiresTcProof}
-                hasTcProof={Boolean(proofTcFile)}
                 hasPhoto={Boolean(photoDataUrl)}
                 photoSizeKb={photoSizeKb}
                 isConfirmed={formData.confirmed}
@@ -1043,71 +1039,6 @@ export const StudentPortal: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Dynamic Proof Upload Section */}
-                      {(requires10thProof || requiresTcProof) && (
-                        <div className="p-5 bg-amber-50/60 border border-amber-300/80 rounded-2xl space-y-4">
-                          <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wider">
-                            <AlertCircle className="w-4 h-4 text-amber-600" />
-                            <span>Proof Documents Required for Correction</span>
-                          </div>
-                          <p className="text-xs text-amber-800">
-                            Because one or more fields differ from the university enrollment database, official supporting proofs are mandatory:
-                          </p>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {requires10thProof && (
-                              <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-2xs space-y-2">
-                                <label className="block text-xs font-bold text-slate-800">
-                                  10th Marksheet Proof (Name Correction) <span className="text-rose-500">*</span>
-                                </label>
-                                <input
-                                  type="file"
-                                  accept="application/pdf,image/jpeg,image/jpg"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                      const res = await handleFileRead(file);
-                                      setProof10thFile({ name: file.name, data: res.data, mime: res.mime });
-                                    }
-                                  }}
-                                  className="w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200"
-                                />
-                                {proof10thFile && (
-                                  <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
-                                    <CheckCircle2 className="w-3.5 h-3.5" /> File attached: {proof10thFile.name}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {requiresTcProof && (
-                              <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-2xs space-y-2">
-                                <label className="block text-xs font-bold text-slate-800">
-                                  Transfer Certificate (TC) Proof <span className="text-rose-500">*</span>
-                                </label>
-                                <input
-                                  type="file"
-                                  accept="application/pdf,image/jpeg,image/jpg"
-                                  onChange={async (e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                      const res = await handleFileRead(file);
-                                      setProofTcFile({ name: file.name, data: res.data, mime: res.mime });
-                                    }
-                                  }}
-                                  className="w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200"
-                                />
-                                {proofTcFile && (
-                                  <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
-                                    <CheckCircle2 className="w-3.5 h-3.5" /> File attached: {proofTcFile.name}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
                       {/* Declaration Checkbox */}
                       <label className="flex items-start gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/60 transition-colors">
                         <input
@@ -1330,12 +1261,12 @@ export const StudentPortal: React.FC = () => {
                 <div className="space-y-6">
                   {/* Visual Review Pipeline Stepper */}
                   <ReviewStateProgressIndicator
-                    status={trackResult.status}
+                    status={trackResult.status || trackResult.approvalStatus || 'PENDING_TEACHER'}
                     teacherRemarks={trackResult.teacherRemarks}
                     hodRemarks={trackResult.hodRemarks}
                     deanRemarks={trackResult.deanRemarks}
-                    studentName={trackResult.name}
-                    regNo={trackResult.regNo}
+                    studentName={trackResult.name || trackResult.studentName}
+                    regNo={trackResult.regNo || trackResult.registerNumber}
                     submissionId={trackResult.submissionId}
                   />
 
@@ -1390,7 +1321,7 @@ export const StudentPortal: React.FC = () => {
                       </div>
                     </div>
 
-                    {trackResult.status.includes('REJECTED') && (
+                    {String(trackResult.status || trackResult.approvalStatus || '').toUpperCase().includes('REJECT') && (
                       <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3">
                         <div className="text-xs text-rose-800">
                           <strong className="block text-rose-900 mb-0.5">Action Required:</strong>
@@ -1398,10 +1329,11 @@ export const StudentPortal: React.FC = () => {
                         </div>
                         <button
                           onClick={() => {
-                            setLookupRegNo(trackResult.regNo);
+                            const rNo = trackResult.regNo || trackResult.registerNumber || '';
+                            setLookupRegNo(rNo);
                             setActiveTab('upload');
                             setStep(1);
-                            handleLookup(trackResult.regNo);
+                            if (rNo) handleLookup(rNo);
                           }}
                           className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors shrink-0"
                         >

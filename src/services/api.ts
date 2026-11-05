@@ -443,8 +443,8 @@ export const api = {
       batch: payload.batch,
       photoUpload: `${regNo}.jpg`,
       finalDriveUrl: payload.photoData,
-      proof10thUrl: payload.proof10thData || '',
-      proofTcUrl: payload.proofTcData || '',
+      proof10thUrl: '',
+      proofTcUrl: '',
       validationNotes: payload.isNameCorrected ? 'Name Corrected' : 'Verified profile details without edits.',
       approvalStatus: 'PENDING_TEACHER',
       teacherRemarks: '',
@@ -475,7 +475,15 @@ export const api = {
         const response = await fetch(apiUrl(`/api/student/status/${encodeURIComponent(cleanQuery)}`));
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
-          return await response.json();
+          const res = await response.json();
+          if (res.success && res.data) {
+            const st = res.data.status || res.data.approvalStatus || 'PENDING_TEACHER';
+            res.data.status = st;
+            res.data.approvalStatus = st;
+            res.data.regNo = res.data.regNo || res.data.registerNumber || cleanQuery;
+            res.data.name = res.data.name || res.data.studentName || '';
+          }
+          return res;
         }
       } catch {
         // Fallback
@@ -491,6 +499,13 @@ export const api = {
           body: JSON.stringify({ action: 'checkSubmissionStatus', query: cleanQuery }),
         });
         const res = await response.json();
+        if (res.success && res.data) {
+          const st = res.data.status || res.data.approvalStatus || 'PENDING_TEACHER';
+          res.data.status = st;
+          res.data.approvalStatus = st;
+          res.data.regNo = res.data.regNo || res.data.registerNumber || cleanQuery;
+          res.data.name = res.data.name || res.data.studentName || '';
+        }
         return res;
       } catch (e: any) {
         console.warn('Network call failed:', e);
@@ -505,19 +520,26 @@ export const api = {
     );
 
     if (found) {
+      const st = found.approvalStatus || 'PENDING_TEACHER';
       return {
         success: true,
         data: {
           submissionId: found.submissionId,
           email: found.studentEmail,
           regNo: found.registerNumber,
+          registerNumber: found.registerNumber,
           name: found.studentName,
+          studentName: found.studentName,
           dept: found.departmentBranch,
+          departmentBranch: found.departmentBranch,
           specialization: found.specialization,
+          semester: found.semester || 'VIII',
           section: found.section,
           batch: found.batch,
-          status: found.approvalStatus,
+          status: st,
+          approvalStatus: st,
           valStatus: found.validationNotes,
+          validationNotes: found.validationNotes,
           teacherRemarks: found.teacherRemarks,
           hodRemarks: found.hodRemarks,
         },

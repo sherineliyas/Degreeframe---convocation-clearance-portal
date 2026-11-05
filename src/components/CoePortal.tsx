@@ -1209,16 +1209,16 @@ export const CoePortal: React.FC = () => {
           </form>
 
           {/* Folder Structure Preview */}
-          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs text-slate-600 max-w-2xl">
-            <span className="font-bold text-slate-800 block mb-2">Automated Folder Structure Generated:</span>
+          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs text-slate-600 max-w-2xl space-y-2">
+            <span className="font-bold text-slate-800 block">Google Drive Storage Structure:</span>
             <div className="font-mono text-[11px] space-y-1 text-slate-700">
-              <div>📁 Drive Root [Folder ID: {settings.driveFolderId || 'COE_FOLDER'}]</div>
-              <div className="pl-4">└── 📁 Photo</div>
-              <div className="pl-8">└── 📁 AERONAUTICAL ENGINEERING</div>
-              <div className="pl-12">└── 📁 Avionics</div>
-              <div className="pl-16">└── 📁 Section A</div>
-              <div className="pl-20">└── 🖼️ 20134001.jpg (Clean &lt; 80KB, 35x40mm)</div>
+              <div>📁 Drive Destination Folder [ID: <code className="text-purple-700 font-bold">{settings.driveFolderId || 'COE_FOLDER_ID'}</code>]</div>
+              <div className="pl-4">└── 🖼️ 20134001.jpg (Direct passport photo, Clean &lt; 80KB)</div>
+              <div className="pl-4">└── 🖼️ 20134002.jpg</div>
             </div>
+            <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-200">
+              Photos are saved directly as <code className="text-purple-700 font-bold">&lt;RegisterNumber&gt;.jpg</code> inside the target Drive folder. No subfolders or proof files required.
+            </p>
           </div>
         </div>
       )}
@@ -1861,6 +1861,7 @@ export const CoePortal: React.FC = () => {
           </div>
         </div>
       )}
+
       {/* User Manual Modal */}
       <UserManualModal isOpen={isManualOpen} onClose={() => setIsManualOpen(false)} defaultRole="coe" />
     </div>

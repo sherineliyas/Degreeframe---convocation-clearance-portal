@@ -36,6 +36,7 @@ interface CoeUserInfo {
   role: 'SUPER_ADMIN' | 'ACOE';
   streamScope: 'ENGINEERING' | 'NON_ENGINEERING' | 'ALL';
   isDefaultPassword?: boolean;
+  otpEnabled?: boolean;
 }
 
 export const CoePortal: React.FC = () => {
@@ -356,6 +357,70 @@ export const CoePortal: React.FC = () => {
       setNotification({ type: 'error', message: 'Error creating ACOE user account.' });
     } finally {
       setIsAddingAcoe(false);
+    }
+  };
+
+  // Toggle Email OTP Status for ACOE User
+  const handleToggleAcoeOtp = async (email: string, currentStatus: boolean) => {
+    try {
+      const res = await api.toggleAcoeOtp(email, !currentStatus);
+      if (res.success) {
+        setNotification({
+          type: 'success',
+          message: res.message || `Email OTP status updated for ${email}.`,
+        });
+        await loadAcoeUsers();
+      } else {
+        setNotification({ type: 'error', message: res.message || 'Failed to toggle OTP status.' });
+      }
+    } catch {
+      setNotification({ type: 'error', message: 'Error updating OTP status.' });
+    }
+  };
+
+  // Edit ACOE Email / Details
+  const handleEditAcoeUser = async (user: any) => {
+    const newName = window.prompt('Update ACOE Full Name / Title:', user.name || '');
+    if (newName === null) return;
+    const newEmail = window.prompt('Update ACOE Official Email:', user.email || '');
+    if (newEmail === null) return;
+
+    if (!newEmail.trim() || !newName.trim()) {
+      setNotification({ type: 'error', message: 'Name and email cannot be empty.' });
+      return;
+    }
+
+    try {
+      const res = await api.updateAcoeUser({
+        oldEmail: user.email,
+        newEmail: newEmail.trim(),
+        name: newName.trim(),
+      });
+      if (res.success) {
+        setNotification({ type: 'success', message: res.message || 'ACOE details updated.' });
+        await loadAcoeUsers();
+      } else {
+        setNotification({ type: 'error', message: res.message || 'Failed to update user.' });
+      }
+    } catch {
+      setNotification({ type: 'error', message: 'Error updating ACOE user.' });
+    }
+  };
+
+  // Remove ACOE User
+  const handleRemoveAcoeUser = async (email: string) => {
+    if (!window.confirm(`Are you sure you want to remove ACOE user ${email}?`)) return;
+
+    try {
+      const res = await api.deleteAcoeUser(email);
+      if (res.success) {
+        setNotification({ type: 'success', message: res.message || `ACOE user ${email} removed.` });
+        await loadAcoeUsers();
+      } else {
+        setNotification({ type: 'error', message: res.message || 'Failed to remove user.' });
+      }
+    } catch {
+      setNotification({ type: 'error', message: 'Error removing ACOE user.' });
     }
   };
 
@@ -940,6 +1005,18 @@ export const CoePortal: React.FC = () => {
           <Users className="w-4 h-4" />
           Submissions Audit ({submissions.length})
         </button>
+
+        <button
+          onClick={() => setActiveTab('acoe')}
+          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'acoe'
+              ? 'bg-purple-700 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          ACOE Directory & OTP ({acoeUsersList.length})
+        </button>
       </div>
 
 
@@ -1450,6 +1527,165 @@ export const CoePortal: React.FC = () => {
                   Student photo submissions (<code className="text-emerald-800">&lt;RegNo&gt;.jpg</code> Drive URLs) and Class Teacher / HOD approvals are automatically recorded in this tab.
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* TAB 6: SUPER ADMIN ACOE DIRECTORY & OTP CONTROLS */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'acoe' && (
+        <div className="space-y-6">
+          {/* Appoint ACOE Form */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-2xs">
+            <div className="mb-6">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-purple-700" />
+                Appoint New Assistant COE (ACOE) Administrator
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Super Admin can appoint additional ACOE officers. Appointed ACOEs can log in securely via 6-digit Email OTP or COE password.
+              </p>
+            </div>
+
+            <form onSubmit={handleAddAcoeUser} className="space-y-4 max-w-2xl">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    ACOE Officer Name & Title *
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={acoeForm.name}
+                      onChange={(e) => setAcoeForm({ ...acoeForm, name: e.target.value })}
+                      placeholder="Dr. Sherin Eliyas"
+                      className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Official ACOE Email Address *
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="email"
+                      value={acoeForm.email}
+                      onChange={(e) => setAcoeForm({ ...acoeForm, email: e.target.value })}
+                      placeholder="sherine@hindustanuniv.ac.in"
+                      className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Initial Security Password
+                </label>
+                <input
+                  type="text"
+                  value={acoeForm.password || 'Acoe@123'}
+                  onChange={(e) => setAcoeForm({ ...acoeForm, password: e.target.value })}
+                  placeholder="Acoe@123"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isAddingAcoe}
+                className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-60 cursor-pointer"
+              >
+                {isAddingAcoe ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Appointing ACOE Administrator...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    Appoint ACOE Administrator
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+
+          {/* Authorized COE Users Directory Table */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-purple-700" />
+                  Authorized COE Users Directory
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Manage ACOE emails and user appointments for the COE portal.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadAcoeUsers}
+                disabled={isLoadingAcoeUsers}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer self-start"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAcoeUsers ? 'animate-spin' : ''}`} />
+                Refresh Directory
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 bg-slate-50/60">
+                    <th className="py-3 px-4 font-semibold">User Name / Title</th>
+                    <th className="py-3 px-4 font-semibold">Login Key (Email)</th>
+                    <th className="py-3 px-4 font-semibold text-right">Actions & Controls</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {acoeUsersList.map((u) => {
+                    return (
+                      <tr key={u.email} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3.5 px-4 font-bold text-slate-900">
+                          {u.name || 'ACOE Officer'}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono font-medium text-slate-800">
+                          {u.email}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleEditAcoeUser(u)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all cursor-pointer"
+                            >
+                              Edit Email
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAcoeUser(u.email)}
+                              className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold transition-all cursor-pointer"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

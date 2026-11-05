@@ -197,9 +197,50 @@ const INITIAL_COE_USERS: CoeUserRecord[] = [
     isDefaultPassword: true,
     otpEnabled: true,
   },
+  {
+    email: 'sherine@hindustanuniv.ac.in',
+    name: 'Dr. Sherin Eliyas (ACOE)',
+    role: 'ACOE',
+    streamScope: 'ALL',
+    password: 'Acoe@123',
+    isDefaultPassword: true,
+    otpEnabled: true,
+  },
 ];
 
 let coeUsersData: CoeUserRecord[] = [...INITIAL_COE_USERS];
+
+const COE_USERS_FILE_PATH = path.resolve(__dirname, 'coe_users.json');
+
+function loadCoeUsersFromDisk() {
+  try {
+    if (fs.existsSync(COE_USERS_FILE_PATH)) {
+      const saved: CoeUserRecord[] = JSON.parse(fs.readFileSync(COE_USERS_FILE_PATH, 'utf-8'));
+      if (Array.isArray(saved) && saved.length > 0) {
+        for (const u of saved) {
+          if (!u || !u.email) continue;
+          const idx = coeUsersData.findIndex((existing) => existing.email.toLowerCase() === u.email.toLowerCase());
+          if (idx >= 0) {
+            coeUsersData[idx] = { ...coeUsersData[idx], ...u };
+          } else {
+            coeUsersData.push(u);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[USERS] Could not load coe_users.json:', e);
+  }
+}
+loadCoeUsersFromDisk();
+
+function saveCoeUsersToDisk() {
+  try {
+    fs.writeFileSync(COE_USERS_FILE_PATH, JSON.stringify(coeUsersData, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[USERS] Could not save coe_users.json:', e);
+  }
+}
 
 
 function matchesStreamScope(deptBranch: string = '', streamScope: 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING' = 'ALL'): boolean {
@@ -633,14 +674,6 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
         message: `Access Denied: ${email}. Contact COE.`,
       });
     }
-
-    // Check if Super Admin has disabled OTP for this specific ACOE user
-    if (coeUser.otpEnabled === false) {
-      return res.status(403).json({
-        success: false,
-        message: `Access Denied: Email OTP authentication for ${email} has been disabled by the Super Admin. Please login using your COE password.`,
-      });
-    }
   } else if (portalType === 'faculty') {
     // Only HODs appointed by COE or Class Teachers assigned by HOD (present in facultyData)
     let faculty = facultyData.find((f) => f.email.toLowerCase() === email);
@@ -994,6 +1027,8 @@ app.post('/api/coe/add-acoe', async (req: Request, res: Response) => {
     section: 'ALL',
   });
 
+  saveCoeUsersToDisk();
+
   return res.json({
     success: true,
     message: `ACOE User ${cleanName} (${cleanEmail}) appointed and saved to Master Sheet Faculty tab. Email OTP: ${newAcoe.otpEnabled ? 'Enabled' : 'Disabled'}.`,
@@ -1012,6 +1047,7 @@ app.post('/api/coe/toggle-otp', (req: Request, res: Response) => {
   }
 
   user.otpEnabled = Boolean(otpEnabled);
+  saveCoeUsersToDisk();
 
   return res.json({
     success: true,
@@ -1042,6 +1078,8 @@ app.post('/api/coe/update-acoe', (req: Request, res: Response) => {
     user.otpEnabled = otpEnabled;
   }
 
+  saveCoeUsersToDisk();
+
   return res.json({
     success: true,
     message: `ACOE User ${user.name} details updated successfully.`,
@@ -1060,6 +1098,7 @@ app.post('/api/coe/delete-acoe', (req: Request, res: Response) => {
   }
 
   const removed = coeUsersData.splice(idx, 1)[0];
+  saveCoeUsersToDisk();
 
   return res.json({
     success: true,

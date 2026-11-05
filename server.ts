@@ -238,6 +238,34 @@ let coeSettings: CoeSettings = {
   convocationBatch: '34th Convocation Ceremony',
 };
 
+const CONFIG_FILE_PATH = path.resolve(__dirname, 'coe_config.json');
+
+function loadCoeConfigFromDisk() {
+  try {
+    if (fs.existsSync(CONFIG_FILE_PATH)) {
+      const saved = JSON.parse(fs.readFileSync(CONFIG_FILE_PATH, 'utf-8'));
+      if (saved.spreadsheetUrl) coeSettings.spreadsheetUrl = saved.spreadsheetUrl;
+      if (saved.spreadsheetId) coeSettings.spreadsheetId = saved.spreadsheetId;
+      if (saved.driveFolderUrl) coeSettings.driveFolderUrl = saved.driveFolderUrl;
+      if (saved.driveFolderId) coeSettings.driveFolderId = saved.driveFolderId;
+      if (saved.scriptUrl) coeSettings.scriptUrl = saved.scriptUrl;
+      if (saved.academicYear) coeSettings.academicYear = saved.academicYear;
+      if (saved.convocationBatch) coeSettings.convocationBatch = saved.convocationBatch;
+    }
+  } catch (e) {
+    console.warn('[CONFIG] Could not load coe_config.json:', e);
+  }
+}
+loadCoeConfigFromDisk();
+
+function saveCoeConfigToDisk() {
+  try {
+    fs.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(coeSettings, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[CONFIG] Could not save coe_config.json:', e);
+  }
+}
+
 // Helper to forward actions to Google Apps Script (Code.gs) for Google Drive .jpg creation & Google Sheets persistence
 async function callGoogleAppsScript(action: string, payload: Record<string, any>, timeoutMs = 15000): Promise<any | null> {
   const targetScriptUrl = (coeSettings.scriptUrl || process.env.GAS_WEB_APP_URL || process.env.GOOGLE_SCRIPT_URL || DEFAULT_GAS_URL).trim();
@@ -1098,6 +1126,9 @@ app.post('/api/coe/config', async (req: Request, res: Response) => {
 
   // Automatically sync Student_data, Faculty, and Submissions from the configured Master Sheet
   await syncFromMasterSheet(true);
+
+  // Save updated configuration to disk
+  saveCoeConfigToDisk();
 
   return res.json({
     success: true,

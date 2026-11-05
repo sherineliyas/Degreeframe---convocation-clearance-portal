@@ -124,11 +124,11 @@ export const CoePortal: React.FC = () => {
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
 
   // Form: Drive Config
-  const [driveUrlInput, setDriveUrlInput] = useState('');
-  const [sheetUrlInput, setSheetUrlInput] = useState('');
+  const [driveUrlInput, setDriveUrlInput] = useState('https://drive.google.com/drive/folders/1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI');
+  const [sheetUrlInput, setSheetUrlInput] = useState('https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit');
   const [scriptUrlInput, setScriptUrlInput] = useState('');
-  const [batchInput, setBatchInput] = useState('');
-  const [yearInput, setYearInput] = useState('');
+  const [batchInput, setBatchInput] = useState('34th Convocation Ceremony');
+  const [yearInput, setYearInput] = useState('2024-2025');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   // Form: Add HOD
@@ -1167,11 +1167,19 @@ export const CoePortal: React.FC = () => {
           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs text-slate-600 max-w-2xl space-y-3">
             <span className="font-bold text-slate-800 block">System Connection Architecture:</span>
             <div className="font-mono text-[11px] space-y-1.5 text-slate-700">
-              <div>📁 <strong>Target Google Drive Folder:</strong> <code className="text-purple-700 font-bold">{settings.driveFolderId || '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI'}</code></div>
-              <div className="pl-4 text-slate-500">└── 🖼️ &lt;RegisterNumber&gt;.jpg (Saved directly without subfolders)</div>
-              <div className="pt-1">📊 <strong>Master Google Spreadsheet:</strong> <code className="text-purple-700 font-bold">{settings.spreadsheetId || '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ'}</code></div>
-              <div className="pl-4 text-slate-500">├── 📄 <strong>Student_data</strong> (9 cols: RegNo, Name, Father Name, DOB, Gender, etc.)</div>
-              <div className="pl-4 text-slate-500">├── 📄 <strong>Submissions</strong> (22 cols: Submissions, Drive URLs, Approval Status)</div>
+              <div>📁 <strong>Target Google Drive Destination Folder:</strong> <code className="text-purple-700 font-bold">{settings.driveFolderId || '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI'}</code></div>
+              <div className="pl-4 text-slate-600 space-y-0.5">
+                <div>└── 📁 <strong>Photos</strong></div>
+                <div className="pl-4">└── 📁 <strong>&lt;Department / Branch&gt;</strong></div>
+                <div className="pl-8">└── 📁 <strong>&lt;Specialization&gt;</strong></div>
+                <div className="pl-12">└── 📁 <strong>Sem &lt;Semester&gt;</strong></div>
+                <div className="pl-16">└── 📁 <strong>Sec &lt;Section&gt;</strong></div>
+                <div className="pl-20">└── 📁 <strong>&lt;Shift / Batch&gt;</strong></div>
+                <div className="pl-24">└── 🖼️ <strong>&lt;RegisterNumber&gt;.jpg</strong></div>
+              </div>
+              <div className="pt-2">📊 <strong>Master Google Spreadsheet:</strong> <code className="text-purple-700 font-bold">{settings.spreadsheetId || '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ'}</code></div>
+              <div className="pl-4 text-slate-500">├── 📄 <strong>Student_data</strong> (9 cols: RegNo, Name, Father Name, DOB, Gender, Year, Branch, Specialization)</div>
+              <div className="pl-4 text-slate-500">├── 📄 <strong>Submissions</strong> (22 cols: Submissions, Drive Photo URLs, Approval Status, Remarks)</div>
               <div className="pl-4 text-slate-500">└── 📄 <strong>Faculty</strong> (8 cols: ACOEs, HODs, and Class Teachers)</div>
             </div>
           </div>

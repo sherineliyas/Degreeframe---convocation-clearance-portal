@@ -29,6 +29,30 @@ app.use((req, res, next) => {
   next();
 });
 
+// Explicit Favicon routes to eliminate any 404 errors (serves ICO and SVG)
+const handleFaviconRequest = (req: Request, res: Response) => {
+  const icoPath = path.resolve(__dirname, 'public/favicon.ico');
+  const svgPath = path.resolve(__dirname, 'public/favicon.svg');
+  if (req.path.endsWith('.svg') && fs.existsSync(svgPath)) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.sendFile(svgPath);
+  }
+  if (fs.existsSync(icoPath)) {
+    res.setHeader('Content-Type', 'image/x-icon');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.sendFile(icoPath);
+  }
+  if (fs.existsSync(svgPath)) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.sendFile(svgPath);
+  }
+  return res.status(204).end();
+};
+
+app.get(['/favicon.ico', '/favicon.svg', '*/favicon.ico', '*/favicon.svg'], handleFaviconRequest);
+
 // Enable JSON, URL-encoded, and text/plain JSON body parsing up to 50MB for photos and documents
 // Supporting text/plain allows cross-origin POST requests from GitHub Pages to bypass browser OPTIONS preflight
 app.use(express.json({ limit: '50mb' }));
@@ -215,7 +239,7 @@ let coeSettings: CoeSettings = {
 };
 
 // Helper to forward actions to Google Apps Script (Code.gs) for Google Drive .jpg creation & Google Sheets persistence
-async function callGoogleAppsScript(action: string, payload: Record<string, any>): Promise<any | null> {
+async function callGoogleAppsScript(action: string, payload: Record<string, any>, timeoutMs = 15000): Promise<any | null> {
   const targetScriptUrl = (coeSettings.scriptUrl || process.env.GAS_WEB_APP_URL || process.env.GOOGLE_SCRIPT_URL || DEFAULT_GAS_URL).trim();
   if (!targetScriptUrl || !targetScriptUrl.startsWith('http')) {
     return null;
@@ -231,6 +255,7 @@ async function callGoogleAppsScript(action: string, payload: Record<string, any>
         ...payload,
       }),
       redirect: 'follow',
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (response.ok) {
       return await response.json();
@@ -494,25 +519,48 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
     }
   }
 
-  // If direct SMTP is blocked by Render firewall (connection timeout on 465/587), fallback to Google Apps Script over HTTPS Port 443
+  if (lastError.includes('BadCredentials') || lastError.includes('535')) {
+    console.warn(`[SMTP-AUTH-WARNING] Google rejected SMTP login for ${smtpUser}. Google Workspace/Gmail requires a 16-character App Password (not standard account password). Generate one at https://myaccount.google.com/apppasswords`);
+  }
+
+  // If direct SMTP fails (due to BadCredentials or Render port blockage), fallback to Google Apps Script over HTTPS Port 443
   console.log(`[SMTP-FALLBACK] Direct SMTP failed on Render. Dispatching via Google Apps Script HTTPS (Port 443)...`);
-  const gasRes = await callGoogleAppsScript('sendOtp', {
-    email: recipientEmail,
-    otp: otpCode,
-    portalType: portalRole,
-  });
+  const gasRes = await callGoogleAppsScript(
+    'sendOtp',
+    {
+      email: recipientEmail,
+      otp: otpCode,
+      portalType: portalRole,
+    },
+    15000
+  );
 
   if (gasRes && gasRes.success) {
     console.log(`[SMTP-FALLBACK-SUCCESS] OTP email delivered via Google Apps Script HTTPS dispatch.`);
     return { success: true };
   }
 
-  return { success: false, error: lastError || 'SMTP connection timeout on Render.' };
+  const detailedError =
+    lastError.includes('BadCredentials') || lastError.includes('535')
+      ? `Google rejected SMTP password for ${smtpUser} (BadCredentials). Google accounts require a 16-character App Password from Google Account Security settings, not the regular account password.`
+      : lastError || 'SMTP connection timeout on Render.';
+
+  return { success: false, error: detailedError };
 }
 
 // ==========================================
-// 1. AUTHENTICATION & OTP APIS
+// 1. AUTHENTICATION & OTP APIS (STRICT RBAC)
 // ==========================================
+
+// Helper to strictly find an authorized COE / Super Admin / ACOE user
+function findAuthorizedCoeUser(identifier: string): CoeUserRecord | undefined {
+  const clean = String(identifier || '').toLowerCase().trim();
+  if (!clean) return undefined;
+  return coeUsersData.find(
+    (u) => (u.username && u.username.toLowerCase() === clean) || (u.email && u.email.toLowerCase() === clean)
+  );
+}
+
 app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const portalType = String(req.body.portalType || 'student').toLowerCase();
@@ -522,38 +570,69 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Valid email address is required.' });
   }
 
-  // Domain & directory checks
-  const isUnivStudent = email.endsWith('@student.hindustanuniv.ac.in');
-  const isUnivStaff = email.endsWith('@hindustanuniv.ac.in');
-  const isGmail = email.endsWith('@gmail.com');
-  const isRegisteredCoe = coeUsersData.some((u) => u.email.toLowerCase() === email) || facultyData.some((f) => f.email.toLowerCase() === email && String(f.role).toUpperCase().includes('COE'));
-  const isRegisteredFaculty = facultyData.some((f) => f.email.toLowerCase() === email);
-
+  // 1. STRICT ROLE-BASED ACCESS CONTROL (RBAC) CHECKS
   if (portalType === 'coe') {
-    if (!isUnivStaff && !isGmail && !isRegisteredCoe && !email.includes('coe') && !email.includes('admin')) {
-      return res.json({
+    // Only users appointed by Super Admin in coeUsersData (or registered in Master Sheet Faculty tab with COE/ACOE role)
+    let coeUser = findAuthorizedCoeUser(email);
+    if (!coeUser) {
+      await syncFromMasterSheet(true);
+      coeUser = findAuthorizedCoeUser(email);
+    }
+
+    if (!coeUser) {
+      // Check if user was assigned COE/ACOE role in Faculty sheet
+      const matchedAcoe = facultyData.find(
+        (f) => f.email.toLowerCase() === email && (String(f.role).toUpperCase().includes('COE') || String(f.role).toUpperCase().includes('SUPER_ADMIN'))
+      );
+      if (matchedAcoe) {
+        coeUser = {
+          email: matchedAcoe.email.toLowerCase(),
+          name: matchedAcoe.name,
+          role: String(matchedAcoe.role).toUpperCase().includes('SUPER') ? 'SUPER_ADMIN' : 'ACOE',
+          streamScope: (matchedAcoe.department === 'ENGINEERING' || matchedAcoe.department === 'NON_ENGINEERING' ? matchedAcoe.department : 'ALL') as any,
+          password: 'Acoe@123',
+          isDefaultPassword: true,
+          otpEnabled: true,
+        };
+        coeUsersData.push(coeUser);
+      }
+    }
+
+    // Reject unauthorized users
+    if (!coeUser) {
+      return res.status(403).json({
         success: false,
-        message: 'Access Denied: Controller of Examinations (COE) portal requires an authorized email address.',
+        message: `Access Denied: ${email}. Contact COE.`,
       });
     }
 
-    const coeUser = coeUsersData.find((u) => u.email.toLowerCase() === email);
-    if (coeUser && coeUser.otpEnabled === false) {
-      return res.json({
+    // Check if Super Admin has disabled OTP for this specific ACOE user
+    if (coeUser.otpEnabled === false) {
+      return res.status(403).json({
         success: false,
-        message: `Access Denied: Email OTP authentication for ${email} has been disabled by Super Admin.`,
+        message: `Access Denied: Email OTP authentication for ${email} has been disabled by the Super Admin. Please login using your COE password.`,
       });
     }
   } else if (portalType === 'faculty') {
-    if (!isUnivStaff && !isGmail && !isRegisteredFaculty) {
-      return res.json({
+    // Only HODs appointed by COE or Class Teachers assigned by HOD (present in facultyData)
+    let faculty = facultyData.find((f) => f.email.toLowerCase() === email);
+    if (!faculty) {
+      await syncFromMasterSheet(true);
+      faculty = facultyData.find((f) => f.email.toLowerCase() === email);
+    }
+
+    if (!faculty) {
+      return res.status(403).json({
         success: false,
-        message: 'Access Denied: Faculty login requires an authorized faculty email address.',
+        message: `Access Denied: ${email} is not registered in the Faculty/HOD directory. Department HODs must be appointed by the COE, and Class Teachers must be assigned by their HOD.`,
       });
     }
   } else {
-    if (!isUnivStudent && !isGmail && !email.includes('@')) {
-      return res.json({
+    // Student portal validation
+    const isUnivStudent = email.endsWith('@student.hindustanuniv.ac.in');
+    const isGmail = email.endsWith('@gmail.com');
+    if (!isUnivStudent && !isGmail) {
+      return res.status(400).json({
         success: false,
         message: 'Please enter your university student email (@student.hindustanuniv.ac.in) or registered Gmail (@gmail.com).',
       });
@@ -581,7 +660,7 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
 
   return res.json({
     success: true,
-    message: `Verification code sent to ${email} from dycoe@hindustanuniv.ac.in. Please check your email inbox.`,
+    message: `Verification code sent to ${email}. Please check your email inbox.`,
   });
 });
 
@@ -610,26 +689,46 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
   record.expiresAt = Date.now() + 60 * 1000;
 
   if (portalType === 'coe') {
-    let coeUser = coeUsersData.find((u) => u.email.toLowerCase() === email);
+    let coeUser = findAuthorizedCoeUser(email);
     if (!coeUser) {
-      coeUser = {
-        email,
-        name: 'COE Administrator',
-        role: 'SUPER_ADMIN',
-        streamScope: 'ALL',
-        isDefaultPassword: true,
-      };
-      coeUsersData.push(coeUser);
+      await syncFromMasterSheet(true);
+      coeUser = findAuthorizedCoeUser(email);
+    }
+
+    if (!coeUser) {
+      const matchedAcoe = facultyData.find(
+        (f) => f.email.toLowerCase() === email && (String(f.role).toUpperCase().includes('COE') || String(f.role).toUpperCase().includes('SUPER_ADMIN'))
+      );
+      if (matchedAcoe) {
+        coeUser = {
+          email: matchedAcoe.email.toLowerCase(),
+          name: matchedAcoe.name,
+          role: String(matchedAcoe.role).toUpperCase().includes('SUPER') ? 'SUPER_ADMIN' : 'ACOE',
+          streamScope: (matchedAcoe.department === 'ENGINEERING' || matchedAcoe.department === 'NON_ENGINEERING' ? matchedAcoe.department : 'ALL') as any,
+          password: 'Acoe@123',
+          isDefaultPassword: true,
+          otpEnabled: true,
+        };
+        coeUsersData.push(coeUser);
+      }
+    }
+
+    if (!coeUser) {
+      return res.status(403).json({
+        success: false,
+        message: `Access Denied: ${email}. Contact COE.`,
+      });
     }
 
     return res.json({
       success: true,
       message: 'Controller of Examinations authentication verified.',
       user: {
+        username: coeUser.username || coeUser.email.split('@')[0],
         email: coeUser.email,
         name: coeUser.name,
         role: coeUser.role,
-        streamScope: coeUser.streamScope,
+        streamScope: coeUser.streamScope || 'ALL',
         isDefaultPassword: coeUser.isDefaultPassword || false,
       },
     });
@@ -644,12 +743,12 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
     if (!matched) {
       return res.status(403).json({
         success: false,
-        message: 'Access Denied: Email is not registered in the Faculty directory sheet.',
+        message: `Access Denied: ${email} is not registered in the Faculty directory. Department HODs are appointed by COE and Class Teachers are appointed by HOD.`,
       });
     }
     return res.json({
       success: true,
-      message: 'Faculty authentication successful.',
+      message: `Faculty authentication successful (${matched.role}).`,
       faculty: matched,
     });
   }
@@ -660,8 +759,8 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
   });
 });
 
-// Dedicated COE Login Endpoint supporting Username/Email with Password or OTP
-app.post('/api/auth/coe-login', (req: Request, res: Response) => {
+// Dedicated COE Login Endpoint supporting Username/Email with Password or OTP (STRICT RBAC)
+app.post('/api/auth/coe-login', async (req: Request, res: Response) => {
   const identifier = String(req.body.usernameOrEmail || req.body.username || req.body.email || '').toLowerCase().trim();
   const password = String(req.body.password || '').trim();
   const inputOtp = String(req.body.otp || '').trim();
@@ -671,53 +770,38 @@ app.post('/api/auth/coe-login', (req: Request, res: Response) => {
   }
 
   // Search by username or email
-  let coeUser = coeUsersData.find(
-    (u) => (u.username && u.username.toLowerCase() === identifier) || u.email.toLowerCase() === identifier
-  );
+  let coeUser = findAuthorizedCoeUser(identifier);
 
-  // If unregistered in coeUsersData, check facultyData or valid staff/gmail domain
+  if (!coeUser) {
+    await syncFromMasterSheet(true);
+    coeUser = findAuthorizedCoeUser(identifier);
+  }
+
+  // If unregistered in coeUsersData, check facultyData for COE/ACOE role
   if (!coeUser) {
     const matchedAcoe = facultyData.find(
-      (f) => f.email.toLowerCase() === identifier && String(f.role).toUpperCase().includes('COE')
+      (f) => f.email.toLowerCase() === identifier && (String(f.role).toUpperCase().includes('COE') || String(f.role).toUpperCase().includes('SUPER_ADMIN'))
     );
     if (matchedAcoe) {
       coeUser = {
         email: matchedAcoe.email.toLowerCase(),
         name: matchedAcoe.name,
-        role: 'ACOE',
-        streamScope: 'ALL',
+        role: String(matchedAcoe.role).toUpperCase().includes('SUPER') ? 'SUPER_ADMIN' : 'ACOE',
+        streamScope: (matchedAcoe.department === 'ENGINEERING' || matchedAcoe.department === 'NON_ENGINEERING' ? matchedAcoe.department : 'ALL') as any,
         password: 'Acoe@123',
         isDefaultPassword: true,
         otpEnabled: true,
       };
       coeUsersData.push(coeUser);
-    } else if (identifier === 'superadmin' || identifier === 'admin') {
-      coeUser = {
-        username: identifier,
-        email: `${identifier}@hindustanuniv.ac.in`,
-        name: 'Chief COE Super Admin',
-        role: 'SUPER_ADMIN',
-        streamScope: 'ALL',
-        password: 'Admin@123',
-        isDefaultPassword: true,
-      };
-      coeUsersData.push(coeUser);
-    } else if (identifier.includes('@')) {
-      coeUser = {
-        email: identifier,
-        name: 'COE Administrator',
-        role: 'ACOE',
-        streamScope: 'ALL',
-        password: 'Acoe@123',
-        isDefaultPassword: true,
-      };
-      coeUsersData.push(coeUser);
-    } else {
-      return res.json({
-        success: false,
-        message: 'Access Denied: Unregistered COE account or username.',
-      });
     }
+  }
+
+  // Strictly reject unauthorized accounts
+  if (!coeUser) {
+    return res.status(403).json({
+      success: false,
+      message: `Access Denied: ${identifier}. Contact COE.`,
+    });
   }
 
   const isCorrectPassword = Boolean(
@@ -747,7 +831,7 @@ app.post('/api/auth/coe-login', (req: Request, res: Response) => {
       email: coeUser.email,
       name: coeUser.name,
       role: coeUser.role,
-      streamScope: coeUser.streamScope,
+      streamScope: coeUser.streamScope || 'ALL',
       isDefaultPassword: coeUser.isDefaultPassword || false,
     },
   });

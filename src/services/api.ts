@@ -151,7 +151,7 @@ export const api = {
 
     const config = storage.getConfig();
 
-    // Try Express backend first when available (using text/plain to bypass CORS OPTIONS preflight and a 5s timeout to prevent SMTP hang)
+    // Try Express backend first when available
     if (canUseExpressApi()) {
       try {
         const controller = new AbortController();
@@ -164,12 +164,39 @@ export const api = {
         });
         clearTimeout(timeoutId);
         const contentType = response.headers.get('content-type') || '';
-        if (response.status !== 405 && contentType.includes('application/json')) {
+        if (contentType.includes('application/json')) {
           const data = await response.json();
+          // Directly return server's response (e.g. 403 Access Denied or 200 Success)
           return data;
         }
       } catch {
-        // Fallback to Google Apps Script or local OTP if Render is waking up or SMTP timed out
+        // Fallback to local OTP only if server network error
+      }
+    }
+
+    // Client fallback whitelist validation
+    if (portalType === 'coe') {
+      const isSuper = cleanEmail === 'superadmin' || cleanEmail.startsWith('superadmin@') || cleanEmail.startsWith('admin@');
+      const isKnownAcoe = cleanEmail === 'dycoe@hindustanuniv.ac.in' || cleanEmail === 'acoe@hindustanuniv.ac.in';
+      const isLocalAcoe = storage.getFaculty().some((f) => f.email.toLowerCase() === cleanEmail && String(f.role).toUpperCase().includes('COE'));
+      if (!isSuper && !isKnownAcoe && !isLocalAcoe) {
+        return {
+          success: false,
+          message: `Access Denied: ${cleanEmail}. Contact COE.`,
+        };
+      }
+    } else if (portalType === 'faculty') {
+      let facultyList = storage.getFaculty();
+      if (facultyList.length === 0) {
+        await syncMasterSheetClientFallback();
+        facultyList = storage.getFaculty();
+      }
+      const isRegistered = facultyList.some((f) => f.email.toLowerCase() === cleanEmail);
+      if (!isRegistered) {
+        return {
+          success: false,
+          message: `Access Denied: ${cleanEmail} is not registered in the Faculty/HOD directory. Department HODs must be appointed by the COE, and Class Teachers must be assigned by their HOD.`,
+        };
       }
     }
 
@@ -204,11 +231,10 @@ export const api = {
           }),
         });
         const contentType = response.headers.get('content-type') || '';
-        if (response.status !== 405 && contentType.includes('application/json')) {
+        if (contentType.includes('application/json')) {
           const data = await response.json();
-          if (data.success || !isLocalMatch) {
-            return data;
-          }
+          // Directly return server decision (including 403 Access Denied)
+          return data;
         }
       } catch {
         // Fallback
@@ -229,9 +255,7 @@ export const api = {
           }),
         });
         const res = await response.json();
-        if (res.success || !isLocalMatch) {
-          return res;
-        }
+        return res;
       } catch (e: any) {
         console.warn('Network call failed, verifying locally:', e);
       }
@@ -248,12 +272,20 @@ export const api = {
 
     if (portalType === 'coe') {
       const isSuper = cleanEmail.startsWith('superadmin@') || cleanEmail.startsWith('admin@');
+      const isKnownAcoe = cleanEmail === 'dycoe@hindustanuniv.ac.in' || cleanEmail === 'acoe@hindustanuniv.ac.in';
+      const isLocalAcoe = storage.getFaculty().some((f) => f.email.toLowerCase() === cleanEmail && String(f.role).toUpperCase().includes('COE'));
+      if (!isSuper && !isKnownAcoe && !isLocalAcoe) {
+        return {
+          success: false,
+          message: `Access Denied: ${cleanEmail}. Contact COE.`,
+        };
+      }
       return {
         success: true,
         message: 'COE authentication verified.',
         user: {
           email: cleanEmail,
-          name: isSuper ? 'Chief COE Super Admin' : 'Controller of Examinations',
+          name: isSuper ? 'Chief COE Super Admin' : cleanEmail.includes('dycoe') ? 'Dr. Dycoe (ACOE)' : 'Controller of Examinations (ACOE)',
           role: isSuper ? 'SUPER_ADMIN' : 'ACOE',
           streamScope: 'ALL',
         },
@@ -270,12 +302,12 @@ export const api = {
       if (matches.length === 0) {
         return {
           success: false,
-          message: 'Access Denied: Email is not registered in the Faculty directory.',
+          message: `Access Denied: ${cleanEmail} is not registered in the Faculty directory. Department HODs are appointed by COE and Class Teachers are appointed by HOD.`,
         };
       }
       return {
         success: true,
-        message: 'Faculty authentication successful.',
+        message: `Faculty authentication successful (${matches[0].role}).`,
         faculty: matches[0],
       };
     }
@@ -688,8 +720,6 @@ export const api = {
   // COE Login with Username or Email, and Password or OTP
   async coeLogin(usernameOrEmail: string, password?: string, otp?: string): Promise<ApiResponse> {
     const cleanKey = usernameOrEmail.toLowerCase().trim();
-    const storedOtp = simulatedOtps[cleanKey];
-    const isLocalOtpMatch = Boolean(otp && storedOtp && storedOtp.otp === otp.trim());
 
     if (canUseExpressApi()) {
       try {
@@ -699,14 +729,13 @@ export const api = {
           body: JSON.stringify({ usernameOrEmail, email: usernameOrEmail, password, otp }),
         });
         const contentType = response.headers.get('content-type') || '';
-        if (response.status !== 405 && contentType.includes('application/json')) {
+        if (contentType.includes('application/json')) {
           const data = await response.json();
           if (data.user && !data.coeUser) {
             data.coeUser = data.user;
           }
-          if (data.success || !isLocalOtpMatch) {
-            return data;
-          }
+          // Directly return server decision (e.g. 403 Access Denied or 200 Success)
+          return data;
         }
       } catch {
         // Fallback
@@ -714,22 +743,39 @@ export const api = {
     }
 
     const isSuper = cleanKey === 'superadmin' || cleanKey === 'admin' || cleanKey.startsWith('superadmin@') || cleanKey.startsWith('admin@');
+    const isKnownAcoe = cleanKey === 'dycoe@hindustanuniv.ac.in' || cleanKey === 'acoe@hindustanuniv.ac.in';
+    const localAcoes = storage.getFaculty().filter((f) => String(f.role).toUpperCase().includes('COE'));
+    const matchedLocal = localAcoes.find((f) => f.email.toLowerCase() === cleanKey);
+
+    if (!isSuper && !isKnownAcoe && !matchedLocal) {
+      return {
+        success: false,
+        message: `Access Denied: ${cleanKey}. Contact COE.`,
+      };
+    }
+
     if (isSuper && password && password !== 'Admin@123') {
       return {
         success: false,
         message: 'Invalid Super Admin username or password.',
       };
     }
-    const isEngg = cleanKey.includes('1') || cleanKey.includes('engg');
+
+    const name = isSuper
+      ? 'Chief COE Super Admin'
+      : cleanKey.includes('dycoe')
+      ? 'Dr. Dycoe (ACOE)'
+      : matchedLocal?.name || 'Controller of Examinations (ACOE)';
+
     return {
       success: true,
-      message: 'COE authentication successful.',
+      message: `COE authentication successful as ${name}.`,
       coeUser: {
         username: isSuper ? 'superadmin' : cleanKey.split('@')[0],
         email: cleanKey.includes('@') ? cleanKey : `${cleanKey}@hindustanuniv.ac.in`,
-        name: isSuper ? 'Chief COE Super Admin' : isEngg ? 'ACOE (Engineering)' : 'ACOE (Non-Engineering)',
+        name,
         role: isSuper ? 'SUPER_ADMIN' : 'ACOE',
-        streamScope: isSuper ? 'ALL' : isEngg ? 'ENGINEERING' : 'NON_ENGINEERING',
+        streamScope: 'ALL',
         isDefaultPassword: password === 'Admin@123' || password === 'Acoe@123',
       },
     };

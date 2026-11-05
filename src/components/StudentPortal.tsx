@@ -215,7 +215,12 @@ export const StudentPortal: React.FC = () => {
     setAuthLoading(true);
     setAuthMessage(null);
     try {
-      const res = await api.verifyOtp(email, otp, 'student');
+      let targetEmail = email.toLowerCase().trim();
+      if (!targetEmail.includes('@')) {
+        targetEmail = targetEmail + '@student.hindustanuniv.ac.in';
+        setEmail(targetEmail);
+      }
+      const res = await api.verifyOtp(targetEmail, otp, 'student');
       if (res.success) {
         setIsAuthenticated(true);
         setAuthMessage(null);

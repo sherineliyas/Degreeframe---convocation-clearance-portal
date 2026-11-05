@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#grad)" />
+  <!-- Graduation Cap -->
+  <path d="M32 14 L54 25 L32 36 L10 25 Z" fill="url(#gold)" />
+  <path d="M20 30.5 L20 44 C20 47.5 25.4 50 32 50 C38.6 50 44 47.5 44 44 L44 30.5 L32 37 Z" fill="#ffffff" opacity="0.9" />
+  <!-- Tassel -->
+  <path d="M49 27.5 L49 41" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" />
+  <circle cx="49" cy="42" r="2" fill="#d97706" />
+  <!-- Star / Accent -->
+  <circle cx="32" cy="25" r="2" fill="#78350f" />
+</svg>

@@ -230,7 +230,7 @@ export const CoePortal: React.FC = () => {
 
     setIsSubmittingAuth(true);
     try {
-      const res = await api.coeLogin(adminEmail, passwordInput);
+      const res = await api.coeLogin(targetEmail, passwordInput);
       if (res.success && res.coeUser) {
         setIsAuthenticated(true);
         setCurrentCoeUser(res.coeUser);
@@ -270,7 +270,7 @@ export const CoePortal: React.FC = () => {
 
     setIsSubmittingAuth(true);
     try {
-      const res = await api.sendOtp(adminEmail, 'coe');
+      const res = await api.sendOtp(targetEmail, 'coe');
       if (res.success) {
         setOtpSent(true);
         setAuthSuccess(res.message || 'Verification passcode sent.');

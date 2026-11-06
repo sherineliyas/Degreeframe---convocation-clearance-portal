@@ -897,12 +897,13 @@ export const FacultyPortal: React.FC = () => {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block font-semibold text-slate-600 mb-1">Department</label>
-                  <input
-                    type="text"
+                  <select
                     value={currentFaculty.department}
-                    readOnly
-                    className="w-full px-3 py-2 border border-slate-200 bg-slate-100 rounded-xl font-medium"
-                  />
+                    disabled
+                    className="w-full px-3 py-2 border border-slate-200 bg-slate-100 rounded-xl font-medium text-slate-700 cursor-not-allowed"
+                  >
+                    <option value={currentFaculty.department}>{currentFaculty.department}</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Specialization</label>

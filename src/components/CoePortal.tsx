@@ -26,6 +26,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { api } from '../services/api';
+import { storage } from '../services/store';
 import { UserManualModal } from './UserManualModal';
 import { FacultyRecord, SubmissionRecord, CoeSettings, CoeOverviewStats } from '../types';
 import { downloadMasterExcelTemplate } from '../utils/excelTemplate';
@@ -745,9 +746,10 @@ export const CoePortal: React.FC = () => {
     return true;
   });
 
-  // Unique departments for filter
+  // Unique departments for filter and HOD appointment
   const departmentsList = Array.from(
     new Set([
+      ...storage.getStudents().map((s) => s.branch).filter(Boolean),
       'AERONAUTICAL ENGINEERING',
       'AEROSPACE ENGINEERING',
       'COMPUTER SCIENCE AND ENGINEERING',
@@ -756,9 +758,10 @@ export const CoePortal: React.FC = () => {
       'CIVIL ENGINEERING',
       'ELECTRICAL AND ELECTRONICS ENGINEERING',
       'ELECTRONICS AND COMMUNICATION ENGINEERING',
+      'MASTER OF COMPUTER APPLICATIONS',
       ...submissions.map((s) => s.departmentBranch).filter(Boolean),
     ])
-  );
+  ).sort();
 
   // -------------------------------------------------------------
   // RENDER 1: AUTHENTICATION SCREEN FOR COE & ACOE

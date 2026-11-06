@@ -166,7 +166,7 @@ interface CoeUserRecord {
   addedAt?: string;
 }
 
-const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwB7rlI6iUJCIFmL8WM0ZhDdKFIxobATliqpUxOAVd0dcsBwVeFd5ZXwQrgMRh1NafggA/exec';
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwFHBlRVUWt06sCFEGRuR0B7aKvGQgt6mNDaeU9xJE/exec';
 
 const INITIAL_COE_USERS: CoeUserRecord[] = [
   {

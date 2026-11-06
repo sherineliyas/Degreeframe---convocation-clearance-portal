@@ -19,7 +19,7 @@ export interface AppConfig {
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
-  scriptUrl: 'https://script.google.com/macros/s/AKfycbwB7rlI6iUJCIFmL8WM0ZhDdKFIxobATliqpUxOAVd0dcsBwVeFd5ZXwQrgMRh1NafggA/exec',
+  scriptUrl: 'https://script.google.com/macros/s/AKfycbwFHBlRVUWt06sCFEGRuR0B7aKvGQgt6mNDaeU9xJE/exec',
   useLiveScript: true,
   spreadsheetId: '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ',
   parentFolderId: '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',

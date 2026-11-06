@@ -162,7 +162,9 @@ function handleSendOtp(data) {
     };
   }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  // Use caller-provided OTP if 6-digits so client, backend, and email stay perfectly synchronized
+  const passedOtp = String(data.otp || data.clientOtp || "").trim();
+  const otp = /^\d{6}$/.test(passedOtp) ? passedOtp : Math.floor(100000 + Math.random() * 900000).toString();
   const cache = CacheService.getScriptCache();
   cache.put("OTP_" + email, otp, 600);
 
@@ -175,7 +177,7 @@ function handleSendOtp(data) {
       `DegreeFrame Convocation Portal`;
 
     MailApp.sendEmail(email, subject, bodyText);
-    return { success: true, message: `OTP sent successfully to ${email}.` };
+    return { success: true, otp: otp, message: `OTP sent successfully to ${email}.` };
   } catch (err) {
     Logger.log("Mail Delivery Error in handleSendOtp: " + err.toString());
     return { success: false, message: "Failed to deliver OTP email: " + err.toString() };
@@ -429,10 +431,16 @@ function processStudentSubmission(formObject) {
   try {
     const rootFolder = DriveApp.getFolderById(PARENT_FOLDER_ID);
 
+    // Exact hierarchical folder structure: Photo -> Department / Branch -> Specialization -> Semester -> Section -> Batch / Shift Selection -> <RegNo>.jpg
+    const sem = String(formObject.semester || "VIII").trim().toUpperCase();
+    const batch = String(formObject.batch || "Batch A").trim();
+
     const photoRootFolder = getOrCreateSubFolder(rootFolder, "Photo");
     const branchFolder = getOrCreateSubFolder(photoRootFolder, dept);
     const specFolder = getOrCreateSubFolder(branchFolder, spec);
-    const photoTargetFolder = getOrCreateSubFolder(specFolder, `Section_${section}`);
+    const semFolder = getOrCreateSubFolder(specFolder, `Semester_${sem}`);
+    const secFolder = getOrCreateSubFolder(semFolder, `Section_${section}`);
+    const photoTargetFolder = getOrCreateSubFolder(secFolder, batch);
 
     const existingOldPhotos = photoTargetFolder.getFilesByName(`${regNo}.jpg`);
     while (existingOldPhotos.hasNext()) {
@@ -452,46 +460,8 @@ function processStudentSubmission(formObject) {
       Logger.log("Photo sharing notice: " + e.toString());
     }
 
-    const proofsRootFolder = getOrCreateSubFolder(rootFolder, "Proofs");
-    const proofBranchFolder = getOrCreateSubFolder(proofsRootFolder, dept);
-    const proofSpecFolder = getOrCreateSubFolder(proofBranchFolder, spec);
-    const proofTargetFolder = getOrCreateSubFolder(proofSpecFolder, `Section_${section}`);
-
     let proof10thUrl = "";
-    if (formObject.proof10thFile && formObject.proof10thFile.data) {
-      const raw10thBase64 = String(formObject.proof10thFile.data).includes("base64,")
-        ? String(formObject.proof10thFile.data).split("base64,")[1]
-        : String(formObject.proof10thFile.data);
-      const p10Bytes = Utilities.base64Decode(raw10thBase64);
-      const isPdf = (formObject.proof10thFile.mimeType === "application/pdf");
-      const ext = isPdf ? "pdf" : "jpg";
-      const p10FileName = `${regNo}_10th_Certicate.${ext}`;
-
-      const existing10th = proofTargetFolder.getFilesByName(p10FileName);
-      while (existing10th.hasNext()) existing10th.next().setTrashed(true);
-
-      const p10Blob = Utilities.newBlob(p10Bytes, formObject.proof10thFile.mimeType || "application/pdf", p10FileName);
-      const saved10th = proofTargetFolder.createFile(p10Blob);
-      proof10thUrl = saved10th.getUrl();
-    }
-
     let proofTcUrl = "";
-    if (formObject.proofTcFile && formObject.proofTcFile.data) {
-      const rawTcBase64 = String(formObject.proofTcFile.data).includes("base64,")
-        ? String(formObject.proofTcFile.data).split("base64,")[1]
-        : String(formObject.proofTcFile.data);
-      const tcBytes = Utilities.base64Decode(rawTcBase64);
-      const isPdf = (formObject.proofTcFile.mimeType === "application/pdf");
-      const ext = isPdf ? "pdf" : "jpg";
-      const tcFileName = `${regNo}_TC_Certicate.${ext}`;
-
-      const existingTc = proofTargetFolder.getFilesByName(tcFileName);
-      while (existingTc.hasNext()) existingTc.next().setTrashed(true);
-
-      const tcBlob = Utilities.newBlob(tcBytes, formObject.proofTcFile.mimeType || "application/pdf", tcFileName);
-      const savedTc = proofTargetFolder.createFile(tcBlob);
-      proofTcUrl = savedTc.getUrl();
-    }
 
     const correctionsList = [];
     if (formObject.isNameCorrected) correctionsList.push("Name Corrected");

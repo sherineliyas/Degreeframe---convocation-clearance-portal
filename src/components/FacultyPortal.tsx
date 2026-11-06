@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import { storage } from '../services/store';
 import { FacultyRecord, SubmissionRecord } from '../types';
 import { UserManualModal } from './UserManualModal';
-import { formatDriveImageUrl } from '../utils/imageUtils';
+import { formatDriveImageUrl, extractDriveFileId, DEFAULT_AVATAR_SVG } from '../utils/imageUtils';
 import {
   ShieldCheck,
   UserCheck,
@@ -624,9 +624,20 @@ export const FacultyPortal: React.FC = () => {
                     <div className="shrink-0 text-center">
                       <div className="relative group w-[105px] h-[125px] rounded-xl overflow-hidden border border-slate-300 bg-slate-100 shadow-2xs mx-auto">
                         <img
-                          src={app.finalDriveUrl}
+                          src={formatDriveImageUrl(app.finalDriveUrl)}
                           alt={app.studentName}
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
                           className="w-full h-full object-cover"
+                          onError={(e: any) => {
+                            e.target.onerror = null;
+                            const fid = extractDriveFileId(app.finalDriveUrl);
+                            if (fid && !e.target.src.includes('lh3.googleusercontent.com')) {
+                              e.target.src = `https://lh3.googleusercontent.com/d/${fid}=s800`;
+                            } else {
+                              e.target.src = DEFAULT_AVATAR_SVG;
+                            }
+                          }}
                         />
                         <button
                           onClick={() => setPreviewMedia({ type: 'photo', student: app })}
@@ -775,10 +786,16 @@ export const FacultyPortal: React.FC = () => {
                     <img
                       src={formatDriveImageUrl(previewMedia.student.finalDriveUrl)}
                       alt="Student"
+                      referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                       onError={(e: any) => {
                         e.target.onerror = null;
-                        e.target.src = 'https://via.placeholder.com/200x240?text=Photo';
+                        const fid = extractDriveFileId(previewMedia.student.finalDriveUrl);
+                        if (fid && !e.target.src.includes('lh3.googleusercontent.com')) {
+                          e.target.src = `https://lh3.googleusercontent.com/d/${fid}=s800`;
+                        } else {
+                          e.target.src = DEFAULT_AVATAR_SVG;
+                        }
                       }}
                     />
                   </div>

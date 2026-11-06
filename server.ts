@@ -633,6 +633,7 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
     {
       email: recipientEmail,
       otp: otpCode,
+      clientOtp: otpCode,
       portalType: portalRole,
     },
     15000
@@ -640,6 +641,14 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
 
   if (gasRes && gasRes.success) {
     console.log(`[SMTP-FALLBACK-SUCCESS] OTP email delivered via Google Apps Script HTTPS dispatch.`);
+    if (gasRes.otp && /^\d{6}$/.test(String(gasRes.otp))) {
+      otpCache[recipientEmail] = {
+        otp: String(gasRes.otp).trim(),
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        role: portalRole,
+      };
+      console.log(`[SMTP-FALLBACK] Synced local OTP cache with Google Apps Script code: ${gasRes.otp}`);
+    }
     return { success: true };
   }
 
@@ -765,23 +774,40 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
   const portalType = String(req.body.portalType || 'student').toLowerCase();
 
   const record = otpCache[email];
+  let isValidOtp = Boolean(record && record.otp === inputOtp && Date.now() <= record.expiresAt);
 
-  if (!record || Date.now() > record.expiresAt) {
-    return res.status(400).json({
-      success: false,
-      message: 'OTP has expired or was not requested. Please request a new code.',
-    });
+  // If local cache did not match, check if Google Apps Script issued and cached this OTP
+  if (!isValidOtp) {
+    try {
+      const gasVerify = await callGoogleAppsScript('verifyOtp', {
+        email,
+        otp: inputOtp,
+        portalType,
+      });
+      if (gasVerify && gasVerify.success) {
+        isValidOtp = true;
+        // Keep valid in local cache for consecutive handshake requests
+        otpCache[email] = {
+          otp: inputOtp,
+          expiresAt: Date.now() + 60 * 1000,
+          role: portalType,
+        };
+      }
+    } catch (e: any) {
+      console.warn('[AUTH] GAS verifyOtp fallback check failed:', e?.message || e);
+    }
   }
 
-  if (record.otp !== inputOtp) {
+  if (!isValidOtp) {
     return res.status(400).json({
       success: false,
       message: 'Invalid OTP code. Please check your email and try again.',
     });
   }
 
-  // Keep valid briefly so a follow-up /api/auth/coe-login handshake with the same OTP succeeds
-  record.expiresAt = Date.now() + 60 * 1000;
+  if (record) {
+    record.expiresAt = Date.now() + 60 * 1000;
+  }
 
   if (portalType === 'coe') {
     let coeUser = findAuthorizedCoeUser(email);
@@ -904,7 +930,22 @@ app.post('/api/auth/coe-login', async (req: Request, res: Response) => {
   );
 
   const cachedOtp = otpCache[identifier] || (coeUser.email ? otpCache[coeUser.email] : undefined);
-  const isOtpValid = Boolean(cachedOtp && cachedOtp.otp === inputOtp);
+  let isOtpValid = Boolean(cachedOtp && cachedOtp.otp === inputOtp);
+
+  if (!isCorrectPassword && !isOtpValid && inputOtp) {
+    try {
+      const gasVerify = await callGoogleAppsScript('verifyOtp', {
+        email: coeUser.email,
+        otp: inputOtp,
+        portalType: 'coe',
+      });
+      if (gasVerify && gasVerify.success) {
+        isOtpValid = true;
+      }
+    } catch {
+      // Ignore
+    }
+  }
 
   if (!isCorrectPassword && !isOtpValid) {
     return res.status(400).json({
@@ -1602,6 +1643,66 @@ app.get('/api/student/status/:query', async (req: Request, res: Response) => {
     success: false,
     message: `No submission record found for '${req.params.query}'.`,
   });
+});
+
+// Google Drive Image Proxy to bypass CORS, Referrer, and CSP restrictions for passport photos
+app.get('/api/drive/photo/:fileId', async (req: Request, res: Response) => {
+  const fileId = String(req.params.fileId || '').trim();
+  if (!fileId || !/^[a-zA-Z0-9_-]+$/.test(fileId)) {
+    return res.status(400).send('Invalid Google Drive File ID');
+  }
+
+  // 1. Try Google's direct CDN (lh3.googleusercontent.com)
+  try {
+    const upstream = await fetch(`https://lh3.googleusercontent.com/d/${fileId}=s800`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    const cType = upstream.headers.get('content-type') || '';
+    if (upstream.ok && cType.includes('image')) {
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      res.setHeader('Content-Type', cType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      return res.send(buffer);
+    }
+  } catch (err: any) {
+    console.warn(`[IMAGE-PROXY] CDN fetch failed for ${fileId}:`, err?.message || err);
+  }
+
+  // 2. Try direct Drive export URL
+  try {
+    const upstream = await fetch(`https://drive.google.com/uc?export=view&id=${fileId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(8000),
+    });
+
+    const cType = upstream.headers.get('content-type') || '';
+    if (upstream.ok && cType.includes('image')) {
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      res.setHeader('Content-Type', cType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      return res.send(buffer);
+    }
+  } catch (err: any) {
+    console.warn(`[IMAGE-PROXY] Drive export fetch failed for ${fileId}:`, err?.message || err);
+  }
+
+  // 3. Graceful SVG Placeholder with HTTP 200 (never broken image)
+  const svgPlaceholder = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="360" viewBox="0 0 300 360" fill="#f8fafc">
+    <rect width="300" height="360" rx="16" fill="#f1f5f9"/>
+    <circle cx="150" cy="130" r="60" fill="#cbd5e1"/>
+    <path d="M60 290 C60 220 100 200 150 200 C200 200 240 220 240 290 Z" fill="#cbd5e1"/>
+    <text x="150" y="325" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="#64748b">Student Photo</text>
+  </svg>`;
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.status(200).send(svgPlaceholder);
 });
 
 // ==========================================

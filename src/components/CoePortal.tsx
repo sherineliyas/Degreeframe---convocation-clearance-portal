@@ -29,7 +29,7 @@ import { api } from '../services/api';
 import { UserManualModal } from './UserManualModal';
 import { FacultyRecord, SubmissionRecord, CoeSettings, CoeOverviewStats } from '../types';
 import { downloadMasterExcelTemplate } from '../utils/excelTemplate';
-import { formatDriveImageUrl } from '../utils/imageUtils';
+import { formatDriveImageUrl, extractDriveFileId, DEFAULT_AVATAR_SVG } from '../utils/imageUtils';
 
 interface CoeUserInfo {
   email: string;
@@ -786,7 +786,6 @@ export const CoePortal: React.FC = () => {
               </div>
               <ul className="text-[11px] text-purple-800 space-y-1 list-disc list-inside">
                 <li><strong>Official ACOE Email</strong> (@hindustanuniv.ac.in) for secure Email OTP login.</li>
-                <li><strong>Stream Scope</strong> (Engineering vs Non-Engineering clearance queue oversight).</li>
                 <li><strong>Google Drive Storage Folder URL</strong> where uploaded student photos are saved.</li>
                 <li><strong>Google Sheets Master URL</strong> for student database synchronization.</li>
               </ul>
@@ -1854,10 +1853,17 @@ export const CoePortal: React.FC = () => {
                             <img
                               src={formatDriveImageUrl(sub.finalDriveUrl)}
                               alt={sub.registerNumber}
+                              referrerPolicy="no-referrer"
+                              loading="lazy"
                               className="w-9 h-11 object-cover rounded-md border border-slate-200 shadow-2xs"
                               onError={(e: any) => {
                                 e.target.onerror = null;
-                                e.target.src = 'https://via.placeholder.com/150?text=Photo';
+                                const fid = extractDriveFileId(sub.finalDriveUrl);
+                                if (fid && !e.target.src.includes('lh3.googleusercontent.com')) {
+                                  e.target.src = `https://lh3.googleusercontent.com/d/${fid}=s800`;
+                                } else {
+                                  e.target.src = DEFAULT_AVATAR_SVG;
+                                }
                               }}
                             />
                           ) : (
@@ -1955,10 +1961,16 @@ export const CoePortal: React.FC = () => {
                   <img
                     src={formatDriveImageUrl(inspectRecord.finalDriveUrl)}
                     alt={inspectRecord.studentName}
+                    referrerPolicy="no-referrer"
                     className="w-36 h-44 object-cover rounded-xl border border-slate-200 shadow-md mx-auto"
                     onError={(e: any) => {
                       e.target.onerror = null;
-                      e.target.src = 'https://via.placeholder.com/300x400?text=No+Photo';
+                      const fid = extractDriveFileId(inspectRecord.finalDriveUrl);
+                      if (fid && !e.target.src.includes('lh3.googleusercontent.com')) {
+                        e.target.src = `https://lh3.googleusercontent.com/d/${fid}=s800`;
+                      } else {
+                        e.target.src = DEFAULT_AVATAR_SVG;
+                      }
                     }}
                   />
                 ) : (

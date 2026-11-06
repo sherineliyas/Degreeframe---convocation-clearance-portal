@@ -1,0 +1,1284 @@
+// ==========================================
+// CONFIGURATION (Defaults — dynamically overridden when updated in COE Portal)
+// ==========================================
+let PARENT_FOLDER_ID = "1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI"; 
+let SPREADSHEET_ID = "1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ"; 
+
+// ==========================================
+// REST API ROUTER
+// ==========================================
+
+function doGet(e) {
+  const action = (e && e.parameter && e.parameter.action) || "";
+  if (action === "getPhoto" || action === "photo") {
+    const fileId = (e && e.parameter && (e.parameter.fileId || e.parameter.id)) || "";
+    if (fileId) {
+      try {
+        const file = DriveApp.getFileById(fileId);
+        const blob = file.getBlob();
+        return ContentService.createTextOutput(JSON.stringify({
+          success: true,
+          mimeType: blob.getContentType(),
+          base64: Utilities.base64Encode(blob.getBytes())
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch (err) {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: err.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+  }
+
+  return ContentService.createTextOutput(JSON.stringify({
+    status: "online",
+    message: "Convocation Photo Clearance Portal API Service is active."
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return createJsonResponse(false, "Empty request body received.");
+    }
+
+    const payload = JSON.parse(e.postData.contents);
+    if (payload.parentFolderId && String(payload.parentFolderId).trim()) {
+      PARENT_FOLDER_ID = String(payload.parentFolderId).trim();
+    }
+    if (payload.spreadsheetId && String(payload.spreadsheetId).trim()) {
+      SPREADSHEET_ID = String(payload.spreadsheetId).trim();
+    }
+    const action = payload.action;
+
+    let responseData = { success: false, message: "Invalid action requested." };
+
+    switch (action) {
+      // ---------------- DRIVE IMAGE STREAMING ----------------
+      case "getPhoto":
+        try {
+          const file = DriveApp.getFileById(payload.fileId);
+          const blob = file.getBlob();
+          responseData = {
+            success: true,
+            mimeType: blob.getContentType(),
+            base64: Utilities.base64Encode(blob.getBytes())
+          };
+        } catch (err) {
+          responseData = { success: false, error: err.toString() };
+        }
+        break;
+
+      // ---------------- AUTHENTICATION & OTP ACTIONS ----------------
+      case "sendOtp":
+        responseData = handleSendOtp(payload);
+        break;
+
+      case "verifyOtp":
+        responseData = handleVerifyOtp(payload);
+        break;
+
+      // ---------------- STUDENT ACTIONS ----------------
+      case "getStudentData":
+        responseData = getStudentDataByRegNo(payload.registerNumber);
+        break;
+
+      case "submitStudentApplication":
+        const formObj = {
+          registerNumber: payload.registerNumber,
+          studentEmail: payload.studentEmail,
+          studentName: payload.studentName,
+          fatherName: payload.fatherName,
+          gender: payload.gender,
+          dob: payload.dob,
+          nationality: payload.nationality,
+          department: payload.department || payload.branch,
+          specialization: payload.specialization,
+          semester: payload.semester || "VIII",
+          section: payload.section,
+          batch: payload.batch || "Batch A",
+          isNameCorrected: payload.isNameCorrected,
+          isFatherCorrected: payload.isFatherCorrected,
+          isGenderCorrected: payload.isGenderCorrected,
+          isDobCorrected: payload.isDobCorrected,
+          isNationalityCorrected: payload.isNationalityCorrected,
+          photoFile: payload.photoData ? {
+            name: `${payload.registerNumber}.jpg`,
+            mimeType: "image/jpeg",
+            data: payload.photoData
+          } : null,
+          proof10thFile: payload.proof10thData ? {
+            name: `${payload.registerNumber}_10th_Certicate`,
+            mimeType: payload.proof10thMime || "application/pdf",
+            data: payload.proof10thData
+          } : null,
+          proofTcFile: payload.proofTcData ? {
+            name: `${payload.registerNumber}_TC_Certicate`,
+            mimeType: payload.proofTcMime || "application/pdf",
+            data: payload.proofTcData
+          } : null
+        };
+        responseData = processStudentSubmission(formObj);
+        break;
+
+      case "checkSubmissionStatus":
+        responseData = checkStudentStatus(payload.query || payload.registerNumber || payload.email);
+        break;
+
+      // ---------------- FACULTY & HOD ACTIONS ----------------
+      case "authenticateFaculty":
+      case "facultyLogin":
+        responseData = handleFacultyLogin(payload.email);
+        break;
+
+      case "getSubmissionsForReview":
+      case "getPendingApplications":
+        responseData = getSubmissionsForReview(payload);
+        break;
+
+      case "getFacultySubmissions":
+        responseData = getFacultySubmissions(payload.department, payload.section);
+        return responseData;
+
+      case "updateSubmissionStatus":
+      case "processFacultyAction":
+        responseData = updateApprovalStatus(payload);
+        break;
+
+      case "addClassTeacher":
+        responseData = handleAddClassTeacher(payload);
+        break;
+
+      case "addHod":
+      case "addAcoe":
+      case "upsertFacultyMember":
+        responseData = handleUpsertFacultyMember(payload);
+        break;
+
+      case "updateHod":
+        responseData = handleUpdateHod(payload);
+        break;
+
+      case "deleteHod":
+        responseData = handleDeleteHod(payload);
+        break;
+
+      case "updateClassTeacher":
+        responseData = handleUpdateClassTeacher(payload);
+        break;
+
+      case "deleteClassTeacher":
+        responseData = handleDeleteClassTeacher(payload);
+        break;
+
+      case "updateAcoe":
+        responseData = handleUpdateAcoe(payload);
+        break;
+
+      case "deleteAcoe":
+        responseData = handleDeleteAcoe(payload);
+        break;
+
+      case "syncMasterSheet":
+        responseData = handleSyncMasterSheet();
+        break;
+
+      default:
+        responseData = { success: false, message: `Unknown action: '${action}'` };
+    }
+
+    return ContentService.createTextOutput(JSON.stringify(responseData))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    Logger.log("doPost Execution Error: " + error.toString());
+    return createJsonResponse(false, "API Error: " + error.toString());
+  }
+}
+
+function createJsonResponse(success, message, extraData) {
+  const result = Object.assign({ success: success, message: message }, extraData || {});
+  return ContentService.createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ==========================================
+// OTP & AUTHENTICATION MODULE
+// ==========================================
+
+function handleSendOtp(data) {
+  const email = (data.email || "").toLowerCase().trim();
+  if (!email) return { success: false, message: "Email address is required." };
+
+  // Allowed domain checks for students
+  const isStudentOfficialDomain = email.endsWith("@student.hindustanuniv.ac.in");
+  const isFacultyOfficialDomain = email.endsWith("@hindustanuniv.ac.in");
+  const isPersonalGmail = email.endsWith("@gmail.com");
+
+  if (!isStudentOfficialDomain && !isFacultyOfficialDomain && !isPersonalGmail) {
+    return {
+      success: false,
+      message: "Please enter a valid university email (@student.hindustanuniv.ac.in / @hindustanuniv.ac.in) or Gmail (@gmail.com)."
+    };
+  }
+
+  // Use caller-provided OTP if 6-digits so client, backend, and email stay perfectly synchronized
+  const passedOtp = String(data.otp || data.clientOtp || "").trim();
+  const otp = /^\d{6}$/.test(passedOtp) ? passedOtp : Math.floor(100000 + Math.random() * 900000).toString();
+  const cache = CacheService.getScriptCache();
+  cache.put("OTP_" + email, otp, 600);
+
+  try {
+    const subject = "Convocation Clearance Portal - Login OTP";
+    const bodyText = `Dear User,\n\n` +
+      `Your One-Time Password (OTP) for logging into the Convocation Clearance Portal is: ${otp}\n\n` +
+      `This code is valid for 10 minutes. Do not share this code with anyone.\n\n` +
+      `Regards,\n` +
+      `DegreeFrame Convocation Portal`;
+
+    MailApp.sendEmail(email, subject, bodyText);
+    return { success: true, otp: otp, message: `OTP sent successfully to ${email}.` };
+  } catch (err) {
+    Logger.log("Mail Delivery Error in handleSendOtp: " + err.toString());
+    return { success: false, message: "Failed to deliver OTP email: " + err.toString() };
+  }
+}
+
+function handleVerifyOtp(data) {
+  const email = (data.email || "").toLowerCase().trim();
+  const inputOtp = (data.otp || "").trim();
+  const portalType = String(data.portalType || "").toLowerCase().trim();
+
+  if (!email || !inputOtp) {
+    return { success: false, message: "Email and OTP code are required." };
+  }
+
+  // Strict domain enforcement based on portal type
+  if (portalType === "faculty") {
+    // Faculty MUST end with @hindustanuniv.ac.in (and not @student.hindustanuniv.ac.in)
+    if (!email.endsWith("@hindustanuniv.ac.in") || email.endsWith("@student.hindustanuniv.ac.in")) {
+      return {
+        success: false,
+        message: "Access Denied: Faculty logins are restricted strictly to official faculty domain (@hindustanuniv.ac.in)."
+      };
+    }
+  } else if (portalType === "student") {
+    // Students can use @student.hindustanuniv.ac.in or personal @gmail.com
+    if (!email.endsWith("@student.hindustanuniv.ac.in") && !email.endsWith("@gmail.com")) {
+      return {
+        success: false,
+        message: "Access Denied: Student logins must use @student.hindustanuniv.ac.in or @gmail.com."
+      };
+    }
+  }
+
+  const cache = CacheService.getScriptCache();
+  const storedOtp = cache.get("OTP_" + email);
+
+  if (!storedOtp) {
+    return { success: false, message: "OTP code has expired or was not requested. Please request a new code." };
+  }
+
+  if (storedOtp === inputOtp) {
+    cache.remove("OTP_" + email);
+
+    if (portalType === "faculty") {
+      const authRes = handleFacultyLogin(email);
+      if (!authRes.success) return authRes;
+      return { success: true, message: "Faculty authentication successful.", faculty: authRes.faculty };
+    }
+
+    return { success: true, message: "OTP verified successfully." };
+  } else {
+    return { success: false, message: "Invalid OTP code. Please check and try again." };
+  }
+}
+
+// ==========================================
+// SERVER-SIDE VALIDATION ENGINE
+// ==========================================
+
+function validateStudentPayload(formObject) {
+  const email = String(formObject.studentEmail || "").trim().toLowerCase();
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!email || !emailRegex.test(email)) {
+    return { valid: false, message: "Invalid email syntax provided." };
+  }
+
+  const isOfficialDomain = email.endsWith("@student.hindustanuniv.ac.in");
+  const isPersonalGmail = email.endsWith("@gmail.com");
+  if (!isOfficialDomain && !isPersonalGmail) {
+    return { 
+      valid: false, 
+      message: "Please use your university email (@student.hindustanuniv.ac.in) or a valid Gmail address (@gmail.com)." 
+    };
+  }
+
+  const regNo = String(formObject.registerNumber || "").trim();
+  if (!regNo || regNo.length < 5) {
+    return { valid: false, message: "Invalid Register Number." };
+  }
+
+  if (!formObject.section || !String(formObject.section).trim()) {
+    return { valid: false, message: "Section field is required." };
+  }
+
+  if (!formObject.batch || !String(formObject.batch).trim()) {
+    return { valid: false, message: "Shift / Batch selection is required." };
+  }
+
+  if (!formObject.photoFile || !formObject.photoFile.data) {
+    return { valid: false, message: "Passport photograph is required." };
+  }
+
+  try {
+    const rawPhotoBase64 = String(formObject.photoFile.data).includes("base64,")
+      ? String(formObject.photoFile.data).split("base64,")[1]
+      : String(formObject.photoFile.data);
+    const photoBytes = Utilities.base64Decode(rawPhotoBase64);
+    if (photoBytes.length > 80 * 1024) {
+      return { valid: false, message: `Passport photo exceeds 80KB limit (${(photoBytes.length / 1024).toFixed(1)}KB).` };
+    }
+  } catch (e) {
+    return { valid: false, message: "Photo data encoding error." };
+  }
+
+  if (formObject.isNameCorrected && (!formObject.proof10thFile || !formObject.proof10thFile.data)) {
+    return { valid: false, message: "10th Marksheet Proof Document is required for Name correction." };
+  }
+
+  const requiresTc = formObject.isFatherCorrected || formObject.isGenderCorrected || formObject.isDobCorrected || formObject.isNationalityCorrected;
+  if (requiresTc && (!formObject.proofTcFile || !formObject.proofTcFile.data)) {
+    return { valid: false, message: "Transfer Certificate (TC) Proof Document is required for profile corrections." };
+  }
+
+  return { valid: true };
+}
+
+function sanitizeText(input) {
+  return String(input || "").trim().replace(/[<>]/g, "");
+}
+
+// ==========================================
+// 1. STUDENT MODULE LOGIC
+// ==========================================
+
+function getStudentDataByRegNo(registerNumber) {
+  const queryRegNo = String(registerNumber || "").trim().toLowerCase();
+  if (!queryRegNo) return { success: false, message: "Please enter a valid Register Number." };
+
+  const submissionsSheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Submissions");
+  if (submissionsSheet) {
+    const subData = submissionsSheet.getDataRange().getValues();
+    for (let i = 1; i < subData.length; i++) {
+      const existingRegNo = String(subData[i][2] || "").trim().toLowerCase();
+      if (existingRegNo === queryRegNo) {
+        const status = String(subData[i][17] || subData[i][16] || "").toUpperCase().trim();
+        const isRejected = status.includes("REJECTED") || status === "AUTO_REJECTED";
+
+        if (!isRejected) {
+          return {
+            success: true,
+            alreadySubmitted: true,
+            message: `You have already submitted your application. Current status: ${status}`,
+            data: {
+              submissionId: subData[i][0],
+              email: subData[i][1],
+              regNo: subData[i][2],
+              name: subData[i][3],
+              fatherName: subData[i][4],
+              dept: subData[i][8],
+              specialization: subData[i][9],
+              section: subData[i][10],
+              batch: subData[i][11] || "Batch A",
+              status: status,
+              teacherRemarks: subData[i][18],
+              hodRemarks: subData[i][19]
+            }
+          };
+        }
+      }
+    }
+  }
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Student_data");
+  if (!sheet) return { success: false, message: "'Student_data' sheet missing." };
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { success: false, message: "No records found in Student_data sheet." };
+
+  for (let i = 1; i < data.length; i++) {
+    const regNo = String(data[i][0] || "").trim().toLowerCase();
+    if (regNo === queryRegNo) {
+      let dobValue = data[i][4];
+      if (dobValue instanceof Date) {
+        dobValue = Utilities.formatDate(dobValue, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      } else {
+        dobValue = String(dobValue || "");
+      }
+
+      return {
+        success: true,
+        alreadySubmitted: false,
+        data: {
+          registerNumber: String(data[i][0] || "").trim(),
+          regNo: String(data[i][0] || "").trim(),
+          studentName: String(data[i][1] || "").trim(),
+          fatherName: String(data[i][2] || "").trim(),
+          gender: String(data[i][3] || "").trim(),
+          dob: dobValue,
+          nationality: String(data[i][5] || "").trim(),
+          year: String(data[i][6] || "").trim(),
+          branch: String(data[i][7] || "").trim(),
+          department: String(data[i][7] || "").trim(),
+          specialization: String(data[i][8] || "").trim()
+        }
+      };
+    }
+  }
+
+  return { success: false, message: `Register Number '${registerNumber}' not found in records.` };
+}
+
+function processStudentSubmission(formObject) {
+  const validationResult = validateStudentPayload(formObject);
+  if (!validationResult.valid) {
+    return { success: false, message: validationResult.message };
+  }
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Submissions");
+  if (!sheet) return { success: false, message: "Submissions sheet not found." };
+
+  const data = sheet.getDataRange().getValues();
+
+  const studentEmail = sanitizeText(formObject.studentEmail);
+  const regNo = sanitizeText(formObject.registerNumber).toUpperCase();
+  const name = sanitizeText(formObject.studentName);
+  const fatherName = sanitizeText(formObject.fatherName);
+  const gender = sanitizeText(formObject.gender);
+  const dob = sanitizeText(formObject.dob);
+  const nationality = sanitizeText(formObject.nationality);
+  const dept = sanitizeText(formObject.department || "BRANCH").toUpperCase();
+  const spec = sanitizeText(formObject.specialization || "GENERAL").toUpperCase();
+  const semester = sanitizeText(formObject.semester || "VIII").toUpperCase();
+  const section = sanitizeText(formObject.section || "SEC").toUpperCase();
+  const batch = sanitizeText(formObject.batch || "Batch A").toUpperCase();
+
+  let existingRowIndex = -1;
+
+  const cleanRegNo = regNo.toLowerCase().trim();
+  for (let i = 1; i < data.length; i++) {
+    const existingRegNo = String(data[i][2] || "").toLowerCase().trim();
+
+    if (existingRegNo === cleanRegNo) {
+      existingRowIndex = i + 1;
+      const existingStatus = String(data[i][18] || data[i][17] || "").toUpperCase().trim();
+
+      const isRejected = existingStatus.includes("REJECTED") || existingStatus === "AUTO_REJECTED";
+
+      if (!isRejected) {
+        return { 
+          success: false, 
+          message: `Submission Blocked! Register Number ${regNo} already has a record in status: '${existingStatus || 'PENDING'}'. Re-upload is permitted only if your application is REJECTED.` 
+        };
+      }
+      break;
+    }
+  }
+
+  const submissionId = Utilities.getUuid().substring(0, 8);
+
+  try {
+    const rootFolder = DriveApp.getFolderById(PARENT_FOLDER_ID);
+
+    // Exact hierarchical folder structure: Photo -> Department / Branch -> Specialization -> Semester -> Section -> Batch / Shift Selection -> <RegNo>.jpg
+    const sem = String(formObject.semester || "VIII").trim().toUpperCase();
+    const batch = String(formObject.batch || "Batch A").trim();
+
+    const photoRootFolder = getOrCreateSubFolder(rootFolder, "Photo");
+    const branchFolder = getOrCreateSubFolder(photoRootFolder, dept);
+    const specFolder = getOrCreateSubFolder(branchFolder, spec);
+    const semFolder = getOrCreateSubFolder(specFolder, `Semester_${sem}`);
+    const secFolder = getOrCreateSubFolder(semFolder, `Section_${section}`);
+    const photoTargetFolder = getOrCreateSubFolder(secFolder, batch);
+
+    const existingOldPhotos = photoTargetFolder.getFilesByName(`${regNo}.jpg`);
+    while (existingOldPhotos.hasNext()) {
+      existingOldPhotos.next().setTrashed(true);
+    }
+
+    const rawPhotoBase64 = String(formObject.photoFile.data).includes("base64,")
+      ? String(formObject.photoFile.data).split("base64,")[1]
+      : String(formObject.photoFile.data);
+    const photoBytes = Utilities.base64Decode(rawPhotoBase64);
+    const photoBlob = Utilities.newBlob(photoBytes, 'image/jpeg', `${regNo}.jpg`);
+    const savedPhoto = photoTargetFolder.createFile(photoBlob);
+
+    try {
+      savedPhoto.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch(e) {
+      Logger.log("Photo sharing notice: " + e.toString());
+    }
+
+    let proof10thUrl = "";
+    let proofTcUrl = "";
+
+    const correctionsList = [];
+    if (formObject.isNameCorrected) correctionsList.push("Name Corrected");
+    if (formObject.isFatherCorrected) correctionsList.push("Father Name Corrected");
+    if (formObject.isGenderCorrected) correctionsList.push("Gender Corrected");
+    if (formObject.isDobCorrected) correctionsList.push("DOB Corrected");
+    if (formObject.isNationalityCorrected) correctionsList.push("Nationality Corrected");
+
+    const correctionNotes = correctionsList.length > 0 ? "Requested Corrections: " + correctionsList.join(", ") : "Verified profile details without edits.";
+
+    const rowValues = [
+      submissionId,        // Col A (1) Submission_ID
+      studentEmail,        // Col B (2) Student_Email
+      regNo,               // Col C (3) Register_Number
+      name,                // Col D (4) Student_Name
+      fatherName,          // Col E (5) Father_Name
+      gender,              // Col F (6) Gender
+      dob,                 // Col G (7) DOB
+      nationality,         // Col H (8) Nationality
+      dept,                // Col I (9) Department_Branch
+      spec,                // Col J (10) Specialization
+      semester,            // Col K (11) Semester
+      section,             // Col L (12) Section
+      batch,               // Col M (13) Batch
+      `${regNo}.jpg`,      // Col N (14) Photo_Upload
+      savedPhoto.getUrl(), // Col O (15) Final_Drive_URL
+      proof10thUrl,        // Col P (16) Proof_10th_URL
+      proofTcUrl,          // Col Q (17) Proof_TC_URL
+      correctionNotes,     // Col R (18) Validation_Notes
+      "PENDING_TEACHER",   // Col S (19) Approval_Status
+      "",                  // Col T (20) Teacher_Remarks
+      "",                  // Col U (21) HOD_Remarks
+      ""                   // Col V (22) Dean_Remarks
+    ];
+
+    writeToSheet(sheet, existingRowIndex, rowValues);
+
+    return { 
+      success: true, 
+      trackingId: submissionId,
+      driveUrl: savedPhoto.getUrl(),
+      proof10thUrl: proof10thUrl,
+      proofTcUrl: proofTcUrl,
+      message: "Profile details verified and saved! Photo & Proof documents submitted for Teacher Review." 
+    };
+
+  } catch (error) {
+    Logger.log("Error in processStudentSubmission: " + error.toString());
+    return { success: false, message: "Submission failed: " + error.toString() };
+  }
+}
+
+function checkStudentStatus(searchQuery) {
+  const query = String(searchQuery || "").trim().toLowerCase();
+  if (!query) return { success: false, message: "Please enter Register Number or Email." };
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Submissions");
+  if (!sheet) return { success: false, message: "Submissions database sheet not found." };
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { success: false, message: "No submission records found." };
+
+  for (let i = 1; i < data.length; i++) {
+    const email = String(data[i][1] || "").trim().toLowerCase();
+    const regNo = String(data[i][2] || "").trim().toLowerCase();
+
+    if (email === query || regNo === query) {
+      return {
+        success: true,
+        data: {
+          submissionId: data[i][0],
+          email: data[i][1],
+          regNo: data[i][2],
+          name: data[i][3],
+          fatherName: data[i][4],
+          gender: data[i][5],
+          dob: data[i][6],
+          nationality: data[i][7],
+          dept: data[i][8],
+          specialization: data[i][9],
+          section: data[i][10],
+          batch: data[i][11],
+          fileName: data[i][12],
+          driveUrl: data[i][13],
+          proof10thUrl: data[i][14],
+          proofTcUrl: data[i][15],
+          valStatus: data[i][16],
+          status: data[i][17],
+          appStatus: data[i][17],
+          teacherRemarks: data[i][18],
+          hodRemarks: data[i][19]
+        }
+      };
+    }
+  }
+
+  return { success: false, message: "No submission record found for " + searchQuery };
+}
+
+function getOrCreateSubFolder(parentFolder, folderName) {
+  const search = parentFolder.getFoldersByName(folderName);
+  return search.hasNext() ? search.next() : parentFolder.createFolder(folderName);
+}
+
+function writeToSheet(sheet, rowIndex, rowData) {
+  if (rowIndex > 0) {
+    sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+}
+
+// ==========================================
+// 2. FACULTY MODULE & AUTHENTICATION LOGIC
+// ==========================================
+
+function handleFacultyLogin(email) {
+  const cleanEmail = String(email || "").trim().toLowerCase();
+
+  if (!cleanEmail.endsWith("@hindustanuniv.ac.in")) {
+    return { 
+      success: false, 
+      message: "Access Restricted: You must log in using your official domain (@hindustanuniv.ac.in)." 
+    };
+  }
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in spreadsheet." };
+
+  const data = sheet.getDataRange().getValues();
+  
+  let facultyName = "";
+  let primaryRole = "";
+  let scopes = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    if (rowEmail === cleanEmail) {
+      if (!facultyName) facultyName = String(data[i][1]).trim();
+      if (!primaryRole) primaryRole = String(data[i][2]).toUpperCase().trim();
+
+      scopes.push({
+        role: String(data[i][2]).toUpperCase().trim(),
+        department: String(data[i][3]).toUpperCase().trim(),
+        specialization: String(data[i][4]).toUpperCase().trim(),
+        section: String(data[i][5]).toUpperCase().trim(),
+        batch: String(data[i][6] || "ALL").toUpperCase().trim()
+      });
+    }
+  }
+
+  if (scopes.length === 0) {
+    return { 
+      success: false, 
+      message: "Access Denied: Email is not registered in the Faculty directory sheet." 
+    };
+  }
+
+  return { 
+    success: true, 
+    faculty: {
+      email: cleanEmail,
+      name: facultyName,
+      role: primaryRole,
+      department: scopes[0].department,
+      specialization: scopes.map(s => s.specialization).join(", "),
+      section: scopes[0].section,
+      batch: scopes[0].batch,
+      scopes: scopes // Full list of assigned permissions
+    },
+    facultyName: facultyName
+  };
+}
+
+
+function getSubmissionsForReview(payload) {
+  const email = payload.email;
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Submissions");
+  if (!sheet) return { success: true, data: [] };
+
+  const authRes = handleFacultyLogin(email);
+  if (!authRes.success) return authRes;
+
+  const faculty = authRes.faculty;
+  const scopes = faculty.scopes || [faculty];
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { success: true, data: [] };
+
+  const pendingSubmissions = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const dept = String(row[8] || "").toUpperCase().trim();      // Col I: Department
+    const spec = String(row[9] || "").toUpperCase().trim();      // Col J: Specialization
+    const sec = String(row[10] || "").toUpperCase().trim();      // Col K: Section
+    const batch = String(row[11] || "BATCH A").toUpperCase().trim(); // Col L: Batch
+    const status = String(row[17] || "").trim();                 // Col R: Approval Status
+
+    let isEligible = false;
+
+    // Check if student matches ANY of the faculty's assigned scopes
+    for (let s = 0; s < scopes.length; s++) {
+      const scope = scopes[s];
+
+      if (scope.role === "TEACHER" && status === "PENDING_TEACHER") {
+        const matchDept = (scope.department === "ALL" || scope.department === dept);
+        const matchSpec = (scope.specialization === "ALL" || scope.specialization === spec);
+        const matchSec = (scope.section === "ALL" || scope.section === sec);
+        const matchBatch = (scope.batch === "ALL" || scope.batch === batch);
+
+        if (matchDept && matchSpec && matchSec && matchBatch) {
+          isEligible = true;
+          break;
+        }
+      } else if (scope.role === "HOD" && status === "PENDING_HOD") {
+        const matchDept = (scope.department === "ALL" || scope.department === dept);
+        if (matchDept) {
+          isEligible = true;
+          break;
+        }
+      }
+    }
+
+    if (isEligible) {
+      const driveUrl = String(row[13] || "");
+      let base64Photo = "";
+
+      if (driveUrl) {
+        try {
+          const fileIdMatch = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/) || driveUrl.match(/id=([a-zA-Z0-9_-]+)/);
+          if (fileIdMatch && fileIdMatch[1]) {
+            const file = DriveApp.getFileById(fileIdMatch[1]);
+            const blob = file.getBlob();
+            base64Photo = `data:${blob.getContentType()};base64,${Utilities.base64Encode(blob.getBytes())}`;
+          }
+        } catch (e) {
+          Logger.log("Image preview encoding notice: " + e.toString());
+        }
+      }
+
+      pendingSubmissions.push({
+        rowIndex: i + 1,
+        submissionId: row[0],
+        email: row[1],
+        registerNumber: row[2],
+        regNo: row[2],
+        studentName: row[3],
+        name: row[3],
+        fatherName: row[4],
+        gender: row[5],
+        dob: row[6],
+        nationality: row[7],
+        department: dept,
+        dept: dept,
+        specialization: spec,
+        spec: spec,
+        section: sec,
+        sec: sec,
+        batch: batch,
+        photoUrl: driveUrl,
+        driveUrl: driveUrl,
+        proof10thUrl: row[14],
+        proofTcUrl: row[15],
+        base64Photo: base64Photo,
+        valStatus: row[16],
+        status: status,
+        appStatus: status,
+        teacherRemarks: row[18],
+        hodRemarks: row[19]
+      });
+    }
+  }
+
+  return { success: true, data: pendingSubmissions };
+}
+
+function updateApprovalStatus(payload) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Submissions");
+  if (!sheet) return { success: false, message: "Submissions sheet missing." };
+
+  const queryId = String(payload.submissionId || payload.registerNumber || "").trim().toLowerCase();
+  const decision = String(payload.decision || payload.status || payload.action || "").toUpperCase().trim();
+  const isApproved = (decision === "APPROVE" || decision === "APPROVED");
+  const remarks = String(payload.remarks || payload.remark || "").trim();
+  const role = String(payload.role || payload.scope || "").toUpperCase().trim();
+
+  const data = sheet.getDataRange().getValues();
+  let rowIndex = payload.rowIndex || -1;
+  let studentEmail = "";
+  let studentName = "";
+  let regNo = "";
+
+  if (rowIndex <= 0) {
+    for (let i = 1; i < data.length; i++) {
+      const rowSubId = String(data[i][0] || "").trim().toLowerCase();
+      const rowRegNo = String(data[i][2] || "").trim().toLowerCase();
+
+      if (rowSubId === queryId || rowRegNo === queryId) {
+        rowIndex = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (rowIndex <= 0 || rowIndex > data.length) {
+    return { success: false, message: "Target submission record not found." };
+  }
+
+  studentEmail = String(data[rowIndex - 1][1]).trim();
+  regNo = String(data[rowIndex - 1][2]).trim();
+  studentName = String(data[rowIndex - 1][3]).trim();
+
+  let nextStatus = "";
+  let remarkColIndex = -1;
+
+  if (role.includes("TEACHER")) {
+    remarkColIndex = 20; // Col T (Teacher_Remarks)
+    nextStatus = isApproved ? "PENDING_HOD" : "REJECTED_BY_TEACHER";
+  } else if (role.includes("HOD")) {
+    remarkColIndex = 21; // Col U (HOD_Remarks)
+    nextStatus = isApproved ? "APPROVED" : "REJECTED_BY_HOD";
+  } else {
+    remarkColIndex = 20;
+    nextStatus = isApproved ? "APPROVED" : "REJECTED";
+  }
+
+  sheet.getRange(rowIndex, 19).setValue(nextStatus); // Col S (Approval_Status)
+  if (remarkColIndex > 0) {
+    sheet.getRange(rowIndex, remarkColIndex).setValue(remarks);
+  }
+
+  if (!isApproved) {
+    sendRejectionEmail(studentEmail, studentName, regNo, remarks, role);
+  }
+
+  return { success: true, message: `Application status updated to ${nextStatus}` };
+}
+
+function sendRejectionEmail(recipientEmail, studentName, regNo, comments, reviewerRole) {
+  const emailStr = String(recipientEmail || "").trim();
+  if (!emailStr || !emailStr.includes("@")) {
+    Logger.log("Skipped sending email - invalid address: " + emailStr);
+    return;
+  }
+
+  const subject = `Convocation Photo Rejected (${regNo})`;
+  const bodyText = `Dear ${studentName},\n\n` +
+    `Your convocation photo submission for Register Number ${regNo} has been REJECTED by ${reviewerRole}.\n\n` +
+    `Reviewer Remarks:\n` +
+    `"${comments || 'Photo not compliant with requirements.'}"\n\n` +
+    `Please visit the portal to re-upload your photo with the requested corrections.\n\n` +
+    `Regards,\n` +
+    `Convocation Clearance Portal`;
+
+  try {
+    MailApp.sendEmail(emailStr, subject, bodyText);
+    Logger.log(`Email successfully delivered to ${emailStr}`);
+  } catch (e) {
+    Logger.log(`MailApp delivery error: ${e.toString()}`);
+  }
+}
+
+function getFacultySubmissions(department, section) {
+  var sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Submissions");
+  if (!sheet) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      message: "Submissions sheet not found."
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      data: []
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var headers = data[0].map(function(h) { return String(h).trim(); });
+  
+  var photoCol = headers.indexOf("Final_Drive_URL") !== -1 ? headers.indexOf("Final_Drive_URL") : (headers.indexOf("PhotoData") !== -1 ? headers.indexOf("PhotoData") : 13);
+  var regNoCol = headers.indexOf("Register_Number") !== -1 ? headers.indexOf("Register_Number") : 2;
+  var nameCol = headers.indexOf("Student_Name") !== -1 ? headers.indexOf("Student_Name") : 3;
+  var deptCol = headers.indexOf("Department_Branch") !== -1 ? headers.indexOf("Department_Branch") : 8;
+  var secCol = headers.indexOf("Section") !== -1 ? headers.indexOf("Section") : 10;
+  var batchCol = headers.indexOf("Batch") !== -1 ? headers.indexOf("Batch") : 11;
+  var statusCol = headers.indexOf("Approval_Status") !== -1 ? headers.indexOf("Approval_Status") : 17;
+
+  var targetDept = String(department || "").toUpperCase().trim();
+  var targetSec = String(section || "").toUpperCase().trim();
+
+  var results = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowDept = String(row[deptCol] || "").toUpperCase().trim();
+    var rowSec = String(row[secCol] || "").toUpperCase().trim();
+
+    if ((targetDept === "ALL" || rowDept === targetDept) && (rowSec === targetSec || targetSec === "ALL")) {
+      results.push({
+        rowId: i + 1,
+        regNo: row[regNoCol],
+        name: row[nameCol],
+        department: row[deptCol],
+        section: row[secCol],
+        batch: row[batchCol] || "Batch A",
+        status: row[statusCol],
+        photoData: row[photoCol]
+      });
+    }
+  }
+
+  return ContentService.createTextOutput(JSON.stringify({
+    success: true,
+    data: results
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ==========================================
+// HOD CLASS TEACHER ASSIGNMENT API
+// ==========================================
+
+function handleAddClassTeacher(payload) {
+  const teacherEmail = (payload.teacherEmail || "").trim().toLowerCase();
+  const teacherName = (payload.teacherName || "").trim();
+  const department = (payload.department || "ALL").trim().toUpperCase();
+  const specialization = (payload.specialization || "ALL").trim().toUpperCase();
+  const semester = (payload.semester || "VIII").trim().toUpperCase();
+  const section = (payload.section || "A").trim().toUpperCase();
+  const batch = (payload.batch || "Batch A").trim();
+
+  if (!teacherEmail || !teacherEmail.endsWith("@hindustanuniv.ac.in")) {
+    return { success: false, message: "Please enter a valid official university email (@hindustanuniv.ac.in)." };
+  }
+  if (!teacherName) {
+    return { success: false, message: "Faculty name is required." };
+  }
+
+  return handleUpsertFacultyMember({
+    email: teacherEmail,
+    name: teacherName,
+    role: "TEACHER",
+    department: department,
+    specialization: specialization,
+    semester: semester,
+    batch: batch,
+    section: section
+  });
+}
+
+// Upsert ACOE, HOD, or Class Teacher into the 'Faculty' tab of the Master Google Sheet
+function handleUpsertFacultyMember(payload) {
+  const email = String(payload.email || payload.teacherEmail || "").trim().toLowerCase();
+  const name = String(payload.name || payload.teacherName || "").trim();
+  const role = String(payload.role || "TEACHER").trim().toUpperCase();
+  const department = String(payload.department || payload.streamScope || "ALL").trim().toUpperCase();
+  const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
+  const semester = String(payload.semester || "ALL").trim().toUpperCase();
+  const batch = String(payload.batch || "ALL").trim();
+  const section = String(payload.section || "ALL").trim().toUpperCase();
+
+  if (!email || !name) {
+    return { success: false, message: "Email and Name are required for Faculty tab entry." };
+  }
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  const rowData = [email, name, role, department, specialization, semester, batch, section];
+
+  // Check if same email + role + department + section already exists
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+    const rowDept = String(data[i][3] || "").trim().toUpperCase();
+    const rowSec = String(data[i][7] || data[i][5] || "").trim().toUpperCase();
+
+    if (
+      (role === "HOD" && rowRole === "HOD" && rowDept === department) ||
+      (role === "ACOE" && rowEmail === email) ||
+      (rowEmail === email && rowRole === role && rowDept === department && rowSec === section)
+    ) {
+      sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      return {
+        success: true,
+        message: `${role} record for ${name} (${email}) updated in Faculty sheet.`
+      };
+    }
+  }
+
+  sheet.appendRow(rowData);
+  return {
+    success: true,
+    message: `${role} record for ${name} (${email}) saved to Faculty sheet.`
+  };
+}
+
+// Dedicated HOD Update Handler (Updates Name, Email, Department, Scope in Master Sheet)
+function handleUpdateHod(payload) {
+  const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
+  const newEmail = String(payload.email || payload.newEmail || oldEmail).trim().toLowerCase();
+  const name = String(payload.name || "").trim();
+  const department = String(payload.department || "").trim().toUpperCase();
+  const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
+  const semester = "ALL";
+  const batch = "ALL";
+  const section = "ALL";
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  const rowData = [newEmail, name, "HOD", department, specialization, semester, batch, section];
+
+  // Match by oldEmail or by Department where role is HOD
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+    const rowDept = String(data[i][3] || "").trim().toUpperCase();
+
+    if (rowRole === "HOD" && (rowEmail === oldEmail || (department && rowDept === department))) {
+      sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      return {
+        success: true,
+        message: `HOD details for ${name} (${newEmail}) updated in Faculty sheet.`
+      };
+    }
+  }
+
+  sheet.appendRow(rowData);
+  return {
+    success: true,
+    message: `HOD record for ${name} (${newEmail}) added to Faculty sheet.`
+  };
+}
+
+// Dedicated HOD Deletion Handler
+function handleDeleteHod(payload) {
+  const email = String(payload.email || "").trim().toLowerCase();
+  const department = String(payload.department || "").trim().toUpperCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+    const rowDept = String(data[i][3] || "").trim().toUpperCase();
+
+    if (rowRole === "HOD" && (rowEmail === email || (department && rowDept === department))) {
+      sheet.deleteRow(i + 1);
+      return {
+        success: true,
+        message: `HOD row for ${email || department} deleted from Faculty sheet.`
+      };
+    }
+  }
+
+  return { success: false, message: "HOD not found in Faculty sheet." };
+}
+
+// Dedicated Class Teacher Update Handler
+function handleUpdateClassTeacher(payload) {
+  const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
+  const newEmail = String(payload.newEmail || payload.teacherEmail || oldEmail).trim().toLowerCase();
+  const name = String(payload.name || payload.teacherName || "").trim();
+  const department = String(payload.department || "").trim().toUpperCase();
+  const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
+  const semester = String(payload.semester || "VIII").trim().toUpperCase();
+  const batch = String(payload.batch || "Batch A").trim();
+  const section = String(payload.section || "A").trim().toUpperCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  const rowData = [newEmail, name, "TEACHER", department, specialization, semester, batch, section];
+
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "TEACHER" && rowEmail === oldEmail) {
+      sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      return {
+        success: true,
+        message: `Class Teacher ${name} (${newEmail}) updated in Faculty sheet.`
+      };
+    }
+  }
+
+  sheet.appendRow(rowData);
+  return { success: true, message: `Class Teacher ${name} (${newEmail}) saved to Faculty sheet.` };
+}
+
+// Dedicated Class Teacher Deletion Handler
+function handleDeleteClassTeacher(payload) {
+  const email = String(payload.teacherEmail || payload.email || "").trim().toLowerCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "TEACHER" && rowEmail === email) {
+      sheet.deleteRow(i + 1);
+      return {
+        success: true,
+        message: `Class Teacher ${email} removed from Faculty sheet.`
+      };
+    }
+  }
+
+  return { success: false, message: "Class Teacher not found in Faculty sheet." };
+}
+
+// Dedicated ACOE Update Handler
+function handleUpdateAcoe(payload) {
+  const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
+  const newEmail = String(payload.newEmail || oldEmail).trim().toLowerCase();
+  const name = String(payload.name || "").trim();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "ACOE" && rowEmail === oldEmail) {
+      sheet.getRange(i + 1, 1).setValue(newEmail);
+      if (name) sheet.getRange(i + 1, 2).setValue(name);
+      return { success: true, message: `ACOE updated in Faculty sheet.` };
+    }
+  }
+  return { success: false, message: "ACOE not found in Faculty sheet." };
+}
+
+// Dedicated ACOE Deletion Handler
+function handleDeleteAcoe(payload) {
+  const email = String(payload.email || "").trim().toLowerCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "ACOE" && rowEmail === email) {
+      sheet.deleteRow(i + 1);
+      return { success: true, message: `ACOE removed from Faculty sheet.` };
+    }
+  }
+  return { success: false, message: "ACOE not found in Faculty sheet." };
+}
+
+// Fetch all 3 tabs (Student_data, Faculty, Submissions) from the Master Google Sheet
+function handleSyncMasterSheet() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+  const students = [];
+  const studentSheet = ss.getSheetByName("Student_data");
+  if (studentSheet) {
+    const sData = studentSheet.getDataRange().getValues();
+    for (let i = 1; i < sData.length; i++) {
+      const regNo = String(sData[i][0] || "").trim();
+      if (!regNo) continue;
+      let dobVal = sData[i][4];
+      if (dobVal instanceof Date) {
+        dobVal = Utilities.formatDate(dobVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      } else {
+        dobVal = String(dobVal || "").trim();
+      }
+      students.push({
+        registerNumber: regNo,
+        name: String(sData[i][1] || "").trim(),
+        fatherName: String(sData[i][2] || "").trim(),
+        gender: String(sData[i][3] || "MALE").trim(),
+        dob: dobVal,
+        nationality: String(sData[i][5] || "INDIAN").trim(),
+        year: String(sData[i][6] || "IV").trim(),
+        branch: String(sData[i][7] || "").trim(),
+        specialization: String(sData[i][8] || "GENERAL").trim()
+      });
+    }
+  }
+
+  const faculty = [];
+  const facultySheet = ss.getSheetByName("Faculty");
+  if (facultySheet) {
+    const fData = facultySheet.getDataRange().getValues();
+    for (let i = 1; i < fData.length; i++) {
+      const email = String(fData[i][0] || "").trim().toLowerCase();
+      if (!email) continue;
+      faculty.push({
+        email: email,
+        name: String(fData[i][1] || "").trim(),
+        role: String(fData[i][2] || "TEACHER").trim().toUpperCase(),
+        department: String(fData[i][3] || "ALL").trim().toUpperCase(),
+        specialization: String(fData[i][4] || "ALL").trim().toUpperCase(),
+        semester: String(fData[i][5] || "ALL").trim().toUpperCase(),
+        batch: String(fData[i][6] || "ALL").trim(),
+        section: String(fData[i][7] || "ALL").trim().toUpperCase()
+      });
+    }
+  }
+
+  const submissions = [];
+  const subSheet = ss.getSheetByName("Submissions");
+  if (subSheet) {
+    const subData = subSheet.getDataRange().getValues();
+    for (let i = 1; i < subData.length; i++) {
+      const regNo = String(subData[i][2] || "").trim();
+      if (!regNo) continue;
+      submissions.push({
+        submissionId: String(subData[i][0] || `sub-${i}`).trim(),
+        studentEmail: String(subData[i][1] || "").trim().toLowerCase(),
+        registerNumber: regNo,
+        studentName: String(subData[i][3] || "").trim(),
+        fatherName: String(subData[i][4] || "").trim(),
+        gender: String(subData[i][5] || "").trim(),
+        dob: String(subData[i][6] || "").trim(),
+        nationality: String(subData[i][7] || "").trim(),
+        departmentBranch: String(subData[i][8] || "").trim().toUpperCase(),
+        specialization: String(subData[i][9] || "").trim().toUpperCase(),
+        semester: String(subData[i][10] || "VIII").trim().toUpperCase(),
+        section: String(subData[i][11] || "A").trim().toUpperCase(),
+        batch: String(subData[i][12] || "Batch A").trim(),
+        photoUpload: String(subData[i][13] || `${regNo}.jpg`).trim(),
+        finalDriveUrl: String(subData[i][14] || "").trim(),
+        proof10thUrl: String(subData[i][15] || "").trim(),
+        proofTcUrl: String(subData[i][16] || "").trim(),
+        validationNotes: String(subData[i][17] || "").trim(),
+        approvalStatus: String(subData[i][18] || "PENDING_TEACHER").trim().toUpperCase(),
+        teacherRemarks: String(subData[i][19] || "").trim(),
+        hodRemarks: String(subData[i][20] || "").trim(),
+        deanRemarks: String(subData[i][21] || "").trim(),
+        submittedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  return {
+    success: true,
+    students: students,
+    faculty: faculty,
+    submissions: submissions
+  };
+}
+

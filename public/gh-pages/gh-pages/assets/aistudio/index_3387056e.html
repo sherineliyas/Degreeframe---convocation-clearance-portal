@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Portal - Convocation Clearance | HITS</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8f9fa;
+      min-height: 100vh;
+      padding-top: 2rem;
+      padding-bottom: 3rem;
+    }
+    .app-card {
+      max-width: 900px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 1.25rem;
+      box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+    .letter-spacing-2 {
+      letter-spacing: 2px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="app-card p-3 p-md-4">
+    
+    <!-- BRANDING HEADER BANNER -->
+    <div class="d-flex align-items-center justify-content-between bg-light p-3 rounded-4 mb-4 border">
+      <div>
+        <h5 class="fw-bold text-dark mb-0">Convocation Photo Clearance Portal</h5>
+        <small class="text-muted">Hindustan Institute of Technology & Science — Student Portal</small>
+      </div>
+      <a href="../" class="btn btn-outline-secondary btn-sm rounded-pill"><i class="bi bi-house me-1"></i> Home</a>
+    </div>
+
+    <!-- SECTION 1: EMAIL + OTP AUTHENTICATION -->
+    <div id="authSection" class="card border-0 bg-light p-4 mb-4 rounded-4 shadow-sm text-center">
+      <h5 class="fw-bold text-primary mb-2"><i class="bi bi-shield-lock me-2"></i>Student Authentication</h5>
+      <p class="text-muted small mb-3">Please enter your official university email (@student.hindustanuniv.ac.in) or registered Gmail address to receive an OTP.</p>
+      
+      <!-- EMAIL INPUT STEP -->
+      <div class="row justify-content-center g-2" id="emailInputStep">
+        <div class="col-md-7">
+          <input type="email" id="userAuthEmail" class="form-control form-control-lg" placeholder="name@student.hindustanuniv.ac.in" required>
+        </div>
+        <div class="col-md-3">
+          <button type="button" class="btn btn-primary btn-lg w-100 fw-bold shadow-sm" id="btnSendOtp" onclick="requestOtp()">
+            Send OTP
+          </button>
+        </div>
+      </div>
+
+      <!-- OTP VERIFICATION STEP -->
+      <div class="row justify-content-center g-2 mt-3" id="otpInputStep" style="display: none;">
+        <div class="col-md-5">
+          <input type="text" id="userAuthOtp" class="form-control form-control-lg text-center fw-bold letter-spacing-2" placeholder="ENTER 6-DIGIT OTP" maxlength="6">
+        </div>
+        <div class="col-md-3">
+          <button type="button" class="btn btn-success btn-lg w-100 fw-bold shadow-sm" id="btnVerifyOtp" onclick="verifyOtp()">
+            Verify & Login
+          </button>
+        </div>
+        <div class="col-12 mt-2">
+          <button type="button" class="btn btn-link btn-sm text-decoration-none" onclick="resetAuthStep()">← Change Email</button>
+        </div>
+      </div>
+
+      <div id="authAlert" class="mt-3"></div>
+    </div>
+
+    <!-- WRAPPER FOR MAIN PORTAL -->
+    <div id="authenticatedPortalWrapper" style="display: none;">
+
+      <!-- LOGGED-IN STUDENT INFO BANNER -->
+      <div class="alert alert-success d-flex justify-content-between align-items-center py-2 px-3 rounded-3 mb-4">
+        <div>
+          <i class="bi bi-person-check-fill me-2"></i> Authenticated as: <strong id="userEmailBadge"></strong>
+        </div>
+        <button class="btn btn-sm btn-outline-danger py-0" onclick="logoutStudent()"><i class="bi bi-box-arrow-right"></i> Sign Out</button>
+      </div>
+
+      <!-- TOP NAVIGATION TAB SWITCHER -->
+      <div class="row g-2 mb-4">
+        <div class="col-6">
+          <button type="button" id="tabBtn1" class="btn btn-primary w-100 py-2.5 fw-bold rounded-3 active shadow-sm" onclick="switchStudentTab('studentFlowView', 'statusView', this, 'tabBtn2')">
+            <i class="bi bi-file-earmark-person me-1"></i> 1. Verification & Photo Upload
+          </button>
+        </div>
+        <div class="col-6">
+          <button type="button" id="tabBtn2" class="btn btn-outline-primary w-100 py-2.5 fw-bold rounded-3" onclick="switchStudentTab('statusView', 'studentFlowView', this, 'tabBtn1')">
+            <i class="bi bi-clock-history me-1"></i> 2. Track Submission
+          </button>
+        </div>
+      </div>
+
+      <!-- TAB 1: VERIFICATION & PHOTO UPLOAD FLOW -->
+      <div id="studentFlowView">
+        
+        <!-- STEP 1: REGISTER NUMBER LOOKUP -->
+        <div id="lookupSection" class="card border-0 bg-light p-3 p-md-4 mb-4 rounded-4 shadow-sm">
+          <h5 class="fw-bold text-primary mb-3"><i class="bi bi-search me-2"></i>Step 1: Fetch Student Profile</h5>
+          <div class="row g-2">
+            <div class="col-md-9">
+              <input type="text" id="lookupRegNoInput" class="form-control form-control-lg text-uppercase" placeholder="ENTER REGISTER NUMBER (E.G., 19136010)">
+            </div>
+            <div class="col-md-3">
+              <button type="button" class="btn btn-primary btn-lg w-100 fw-bold shadow-sm" onclick="fetchStudentDataForVerification()">
+                Fetch Details
+              </button>
+            </div>
+          </div>
+          <div id="lookupAlert" class="mt-2"></div>
+        </div>
+
+        <!-- ALREADY SUBMITTED STATUS BANNER -->
+        <div id="alreadySubmittedCard" class="card border-info bg-light p-4 mb-4 rounded-4 shadow-sm" style="display: none;">
+          <div class="d-flex align-items-center mb-3 text-info-emphasis">
+            <i class="bi bi-exclamation-circle-fill fs-3 me-2"></i>
+            <h5 class="fw-bold mb-0">Application Already Submitted</h5>
+          </div>
+          <p class="text-muted small">You have already submitted your application for convocation clearance. Further uploads are restricted while under review.</p>
+          
+          <div class="bg-white p-3 rounded-3 border mb-3">
+            <div class="row g-2 small">
+              <div class="col-md-6"><strong>Submission ID:</strong> <span id="subCardId"></span></div>
+              <div class="col-md-6"><strong>Register No:</strong> <span id="subCardRegNo"></span></div>
+              <div class="col-md-6"><strong>Student Name:</strong> <span id="subCardName"></span></div>
+              <div class="col-md-6"><strong>Status:</strong> <span id="subCardStatus" class="badge bg-primary"></span></div>
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-end">
+            <button type="button" class="btn btn-outline-primary btn-sm fw-bold" onclick="switchToTrackViewWithRegNo()">
+              <i class="bi bi-clock-history me-1"></i> View Live Tracking Details
+            </button>
+          </div>
+        </div>
+
+        <!-- STEP 2 & 3 FORM WRAPPER -->
+        <form id="studentVerificationForm" onsubmit="return handleVerifiedSubmission(event);">
+          
+          <!-- STEP 2: SUMMARY & PROFILE VERIFICATION FORM -->
+          <div id="verificationSection" style="display: none;">
+            <div class="card border-0 shadow-sm p-3 p-md-4 mb-4 rounded-4">
+              <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-3">
+                <h5 class="fw-bold text-primary mb-0"><i class="bi bi-person-vcard me-2"></i>Step 2: Verify Profile Record</h5>
+                <span class="badge bg-primary text-wrap" id="deptYearBadge"></span>
+              </div>
+              
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Register Number</label>
+                  <input type="text" id="displayRegNo" name="registerNumber" class="form-control bg-light" readonly>
+                </div>
+
+                <div class="col-md-8">
+                  <label class="form-label fw-bold small text-muted">Email Address (Locked to Portal Login)</label>
+                  <input type="email" id="displayEmail" name="studentEmail" class="form-control bg-light" readonly required>
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label fw-bold small text-muted">Student Name (10th Certificate)</label>
+                  <input type="text" id="displayStudentName" name="studentName" class="form-control" oninput="checkCorrectionState()" required>
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label fw-bold small text-muted">Father Name (TC Record)</label>
+                  <input type="text" id="displayFatherName" name="fatherName" class="form-control" oninput="checkCorrectionState()" required>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Gender</label>
+                  <select id="selectGender" name="gender" class="form-select" onchange="checkCorrectionState()" required>
+                    <option value="MALE">MALE</option>
+                    <option value="FEMALE">FEMALE</option>
+                    <option value="OTHER">OTHER</option>
+                  </select>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Date of Birth (TC)</label>
+                  <input type="date" id="inputDob" name="dob" class="form-control" onchange="checkCorrectionState()" required>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Nationality</label>
+                  <input type="text" id="displayNationality" name="nationality" class="form-control" oninput="checkCorrectionState()" required>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Branch / Department</label>
+                  <input type="text" id="displayBranch" name="department" class="form-control bg-light" readonly required>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Specialization</label>
+                  <input type="text" id="displaySpecialization" name="specialization" class="form-control bg-light" readonly>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Section <span class="text-danger">*</span></label>
+                  <input type="text" id="displaySection" name="section" class="form-control text-uppercase" placeholder="e.g. A, B" required>
+                </div>
+
+                <!-- BATCH / SHIFT SELECTION WITH INSTRUCTION BOX -->
+                <div class="col-12 mt-3">
+                  <div class="alert alert-info py-2 px-3 mb-2 rounded-3 small">
+                    <i class="bi bi-info-circle-fill me-2"></i>
+                    <strong>Batch / Shift Selection Instruction:</strong> Courses with multi-shift programs (e.g., BCA) should select their respective shift (Batch A or Batch B). All other single-shift programs can keep <strong>Batch A</strong> selected by default.
+                  </div>
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label fw-bold small text-muted">Shift / Batch Selection <span class="text-danger">*</span></label>
+                  <select id="displayBatch" name="batch" class="form-select form-select-lg" required>
+                    <option value="Batch A" selected>Batch A (Shift I / Default)</option>
+                    <option value="Batch B">Batch B (Shift II)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- PROOF UPLOAD SECTION -->
+            <div id="proofUploadSection" class="card border-warning p-3 p-md-4 mb-4 rounded-4" style="display:none; background-color: #fffdf5;">
+              <h6 class="fw-bold text-warning-emphasis mb-3"><i class="bi bi-paperclip me-2"></i>Proof Document Attachments</h6>
+              <div class="row g-3">
+                <div class="col-md-6" id="box10thProof" style="display:none;">
+                  <label class="form-label fw-bold small">10th Marksheet Proof (PDF/JPEG, Max 2MB) <span class="text-danger">*</span></label>
+                  <input type="file" class="form-control" id="proof10thFileInput" accept="image/jpeg,image/jpg,application/pdf">
+                </div>
+                <div class="col-md-6" id="boxTcProof" style="display:none;">
+                  <label class="form-label fw-bold small">Transfer Certificate Proof (PDF/JPEG, Max 2MB) <span class="text-danger">*</span></label>
+                  <input type="file" class="form-control" id="proofTcFileInput" accept="image/jpeg,image/jpg,application/pdf">
+                </div>
+              </div>
+            </div>
+
+            <!-- INLINE ALERT FOR STEP 2 VALIDATION -->
+            <div id="step2Alert" class="mb-3"></div>
+
+            <!-- CONFIRMATION -->
+            <div class="form-check mb-4">
+              <input class="form-check-input" type="checkbox" id="chkDetailsConfirmed">
+              <label class="form-check-label fw-semibold" for="chkDetailsConfirmed">
+                I declare that the above details match my official 10th Marksheet & TC documents.
+              </label>
+            </div>
+
+            <div class="text-end">
+              <button type="button" class="btn btn-success btn-lg px-4 fw-bold shadow-sm" onclick="proceedToPhotoStep()">
+                Confirm Details & Proceed <i class="bi bi-arrow-right-circle ms-1"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- STEP 3: PHOTO UPLOAD -->
+          <div id="photoSection" style="display: none;" class="card border-0 shadow-sm p-3 p-md-4 mb-4 rounded-4 bg-light">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold text-primary mb-0"><i class="bi bi-camera me-2"></i>Step 3: Passport Photograph Upload</h5>
+              <button type="button" class="btn btn-outline-primary btn-sm fw-bold" data-bs-toggle="modal" data-bs-target="#photoInstructionModal">
+                <i class="bi bi-info-circle me-1"></i> Read Instructions
+              </button>
+            </div>
+
+            <div class="row g-3 mb-3">
+              <div class="col-md-8">
+                <label class="form-label fw-bold small text-muted">
+                  Upload Photo (JPEG, Strictly Max 80KB, Plain Light Background) <span class="text-danger">*</span>
+                </label>
+                <input type="file" class="form-control form-control-lg" id="photoFileInput" accept="image/jpeg,image/jpg" required onchange="previewPhoto(this)">
+                <small class="text-muted d-block mt-1">Requirements: Formal studio photo, 35mm x 40mm, neutral expression, eyes open, no selfies.</small>
+                <div id="photoValidationAlert" class="mt-2"></div>
+              </div>
+              <div class="col-md-4 text-center">
+                <label class="form-label fw-bold small text-muted d-block">Preview</label>
+                <div id="photoPreviewContainer" class="border rounded bg-white d-flex align-items-center justify-content-center" style="width: 120px; height: 140px; margin: 0 auto;">
+                  <i class="bi bi-person text-secondary fs-1"></i>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center pt-3 border-top">
+              <button type="button" class="btn btn-outline-secondary fw-bold" onclick="backToVerificationStep()">
+                <i class="bi bi-arrow-left me-1"></i> Back
+              </button>
+              <button type="submit" class="btn btn-primary btn-lg px-5 fw-bold shadow-sm" id="submitBtn">
+                Final Submit Application
+              </button>
+            </div>
+          </div>
+
+        </form>
+        <div id="submitAlert" class="mt-3"></div>
+      </div>
+
+      <!-- TAB 2: STATUS TRACKER -->
+      <div id="statusView" style="display: none;">
+        <div class="row g-2 mb-4">
+          <div class="col-md-9">
+            <input type="text" id="trackSearchInput" class="form-control form-control-lg text-uppercase" placeholder="Enter Register Number or Email">
+          </div>
+          <div class="col-md-3">
+            <button type="button" class="btn btn-secondary btn-lg w-100 fw-bold shadow-sm" onclick="checkStatus()">
+              Check Status
+            </button>
+          </div>
+        </div>
+        <div id="statusResult"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- PHOTO INSTRUCTIONS MODAL DIALOG -->
+<div class="modal fade" id="photoInstructionModal" tabindex="-1" aria-labelledby="photoInstructionModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content rounded-4 border-0 shadow">
+      <div class="modal-header bg-primary text-white rounded-top-4">
+        <div>
+          <h6 class="modal-title fw-bold text-uppercase mb-0" id="photoInstructionModalLabel">Office of the Controller of Examinations</h6>
+          <small class="opacity-75">Passport size photo requirements for Degree Certificate</small>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="alert alert-warning d-flex align-items-center mb-3" role="alert">
+          <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
+          <div>
+            <strong>Important Note:</strong> Photographs that do not comply with these instructions will be rejected by the review committee.
+          </div>
+        </div>
+
+        <ul class="list-group list-group-flush small">
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>The photograph should be in <strong>colour</strong> and of the size of <strong>(35 mm x 40 mm)</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>Image size should be <strong>less than 80 KB</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>Clear Image must be in <strong>JPEG format</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-x-circle text-danger me-2"></i><strong>Do not upload self-taken photographs or selfies.</strong></li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>Photographs should be <strong>formal and taken in proper studio</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>It should have <strong>full face, front view, eyes open</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>Photo should present <strong>full head from top of hair to bottom of chin</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i><strong>Center head within frame</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>The photo should have a <strong>plain light-coloured background</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>There should not be any <strong>distracting shadows, flash reflections on the face or in the background</strong>.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>Head coverings are not permitted except for religious reasons, but the facial features from bottom of chin to top of forehead and both edges of the face must be clearly shown.</li>
+          <li class="list-group-item"><i class="bi bi-check2-circle text-success me-2"></i>The expression on the face should look natural <strong>(Neutral & mouth closed)</strong>.</li>
+        </ul>
+      </div>
+      <div class="modal-footer bg-light rounded-bottom-4">
+        <button type="button" class="btn btn-primary btn-sm px-4 fw-bold" data-bs-dismiss="modal">I Understand</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bootstrap 5 JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- CLIENT SCRIPT LOGIC -->
+<script>
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbySUmRQwaIqp3sx1_rUa7x3qWffv_iRFkAClyUkeqcJ4srOc7T0kKm5-bM8Lb9iU4SY/exec";
+  var authenticatedStudentEmail = window.authenticatedStudentEmail || "";
+  var originalFetchedData = null;
+
+  window.requestOtp = async function() {
+    const emailInput = document.getElementById('userAuthEmail').value.trim().toLowerCase();
+    const alertBox = document.getElementById('authAlert');
+    const btnSend = document.getElementById('btnSendOtp');
+
+    alertBox.innerHTML = '';
+
+    if (!emailInput || (!emailInput.endsWith('@student.hindustanuniv.ac.in') && !emailInput.endsWith('@gmail.com'))) {
+      alertBox.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-exclamation-triangle-fill me-2"></i>Please enter a valid @hindustanuniv.ac.in or @gmail.com email address.</div>`;
+      return;
+    }
+
+    btnSend.disabled = true;
+    btnSend.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Sending...`;
+
+    try {
+      const response = await fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "sendOtp", email: emailInput })
+      });
+      const res = await response.json();
+
+      if (res.success) {
+        authenticatedStudentEmail = emailInput;
+        document.getElementById('emailInputStep').style.display = 'none';
+        document.getElementById('otpInputStep').style.display = 'flex';
+        alertBox.innerHTML = `<div class="alert alert-success py-2"><i class="bi bi-check-circle-fill me-2"></i>OTP code sent to <strong>${emailInput}</strong>. Please check your inbox.</div>`;
+      } else {
+        alertBox.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-x-circle-fill me-2"></i>${res.message || 'Failed to send OTP.'}</div>`;
+      }
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-exclamation-octagon-fill me-2"></i>Error sending request: ${err.message}</div>`;
+    } finally {
+      btnSend.disabled = false;
+      btnSend.innerHTML = `Send OTP`;
+    }
+  };
+
+  window.verifyOtp = async function() {
+    const otpEntered = document.getElementById('userAuthOtp').value.trim();
+    const alertBox = document.getElementById('authAlert');
+    const btnVerify = document.getElementById('btnVerifyOtp');
+
+    if (!otpEntered || otpEntered.length !== 6) {
+      alertBox.innerHTML = `<div class="alert alert-warning py-2"><i class="bi bi-exclamation-circle-fill me-2"></i>Please enter a valid 6-digit OTP code.</div>`;
+      return;
+    }
+
+    btnVerify.disabled = true;
+    btnVerify.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Verifying...`;
+
+    try {
+      const response = await fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ 
+          action: "verifyOtp", 
+          email: authenticatedStudentEmail, 
+          otp: otpEntered,
+          portalType: "student"
+        })
+      });
+      const res = await response.json();
+
+      if (res.success) {
+        document.getElementById('authSection').style.display = 'none';
+        document.getElementById('authenticatedPortalWrapper').style.display = 'block';
+        document.getElementById('userEmailBadge').innerText = authenticatedStudentEmail;
+        document.getElementById('displayEmail').value = authenticatedStudentEmail;
+
+        const photoModalElement = document.getElementById('photoInstructionModal');
+        if (photoModalElement && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+          const photoModal = new bootstrap.Modal(photoModalElement);
+          photoModal.show();
+        }
+      } else {
+        alertBox.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-x-circle-fill me-2"></i>${res.message || 'Invalid or expired OTP.'}</div>`;
+      }
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-exclamation-octagon-fill me-2"></i>Error verifying OTP: ${err.message}</div>`;
+    } finally {
+      btnVerify.disabled = false;
+      btnVerify.innerHTML = `Verify & Login`;
+    }
+  };
+
+  window.resetAuthStep = function() {
+    document.getElementById('emailInputStep').style.display = 'flex';
+    document.getElementById('otpInputStep').style.display = 'none';
+    document.getElementById('userAuthOtp').value = '';
+    document.getElementById('authAlert').innerHTML = '';
+  };
+
+  window.logoutStudent = function() {
+    authenticatedStudentEmail = "";
+    document.getElementById('authenticatedPortalWrapper').style.display = 'none';
+    document.getElementById('authSection').style.display = 'block';
+    document.getElementById('displayEmail').value = "";
+    document.getElementById('userAuthEmail').value = "";
+    resetAuthStep();
+  };
+
+  window.switchStudentTab = function(showId, hideId, activeBtn, inactiveBtnId) {
+    const showEl = document.getElementById(showId);
+    const hideEl = document.getElementById(hideId);
+    if (showEl) showEl.style.display = 'block';
+    if (hideEl) hideEl.style.display = 'none';
+
+    if (activeBtn) {
+      activeBtn.classList.add('btn-primary', 'active');
+      activeBtn.classList.remove('btn-outline-primary');
+    }
+    const inactive = typeof inactiveBtnId === 'string' ? document.getElementById(inactiveBtnId) : inactiveBtnId;
+    if (inactive) {
+      inactive.classList.add('btn-outline-primary');
+      inactive.classList.remove('btn-primary', 'active');
+    }
+  };
+
+  window.switchToTrackViewWithRegNo = function() {
+    const regNo = document.getElementById('lookupRegNoInput').value.trim();
+    document.getElementById('trackSearchInput').value = regNo;
+    switchStudentTab('statusView', 'studentFlowView', document.getElementById('tabBtn2'), 'tabBtn1');
+    checkStatus();
+  };
+
+  window.fetchStudentDataForVerification = async function() {
+    const regNo = document.getElementById('lookupRegNoInput').value.trim();
+    const alertBox = document.getElementById('lookupAlert');
+    const alreadySubmittedCard = document.getElementById('alreadySubmittedCard');
+    const verificationSection = document.getElementById('verificationSection');
+    const photoSection = document.getElementById('photoSection');
+
+    alertBox.innerHTML = '';
+    alreadySubmittedCard.style.display = 'none';
+    verificationSection.style.display = 'none';
+    photoSection.style.display = 'none';
+
+    if (!regNo) {
+      alertBox.innerHTML = `<div class="alert alert-warning py-2 mt-2"><i class="bi bi-exclamation-triangle me-1"></i> Please enter a valid Register Number.</div>`;
+      return;
+    }
+
+    alertBox.innerHTML = `<div class="text-primary mt-2"><span class="spinner-border spinner-border-sm me-2"></span> Searching student records...</div>`;
+
+    try {
+      const response = await fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "getStudentData", registerNumber: regNo })
+      });
+      const res = await response.json();
+
+      if (res.success && res.alreadySubmitted) {
+        alertBox.innerHTML = '';
+        document.getElementById('subCardId').innerText = res.data.submissionId || 'N/A';
+        document.getElementById('subCardRegNo').innerText = res.data.regNo || regNo;
+        document.getElementById('subCardName').innerText = res.data.name || 'N/A';
+        document.getElementById('subCardStatus').innerText = res.data.status || 'PENDING';
+        
+        alreadySubmittedCard.style.display = 'block';
+      } else if (res.success && res.data) {
+        originalFetchedData = res.data;
+        document.getElementById('displayRegNo').value = res.data.registerNumber || regNo;
+        document.getElementById('displayStudentName').value = res.data.studentName || '';
+        document.getElementById('displayFatherName').value = res.data.fatherName || '';
+        document.getElementById('selectGender').value = (res.data.gender || 'MALE').toUpperCase();
+        document.getElementById('inputDob').value = res.data.dob || '';
+        document.getElementById('displayNationality').value = res.data.nationality || '';
+        document.getElementById('displayBranch').value = res.data.department || res.data.branch || '';
+        document.getElementById('displaySpecialization').value = res.data.specialization || '';
+
+        document.getElementById('deptYearBadge').innerText = `Year: ${res.data.year || 'N/A'} | Branch: ${res.data.department || res.data.branch || 'N/A'}`;
+        verificationSection.style.display = 'block';
+        alertBox.innerHTML = `<div class="alert alert-success py-2 mt-2"><i class="bi bi-check-circle me-1"></i> Record retrieved! Verify details below.</div>`;
+        checkCorrectionState();
+      } else {
+        alertBox.innerHTML = `<div class="alert alert-danger py-2 mt-2"><i class="bi bi-x-circle me-1"></i> ${res.message || 'Register Number not found.'}</div>`;
+      }
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-danger py-2 mt-2"><i class="bi bi-exclamation-octagon me-1"></i> Error connecting to server: ${err.message}</div>`;
+    }
+  };
+
+  function checkCorrectionState() {
+    if (!originalFetchedData) return;
+
+    const currentName = document.getElementById('displayStudentName').value.trim();
+    const currentFather = document.getElementById('displayFatherName').value.trim();
+    const currentGender = document.getElementById('selectGender').value.trim();
+    const currentDob = document.getElementById('inputDob').value.trim();
+    const currentNat = document.getElementById('displayNationality').value.trim();
+
+    const nameChanged = currentName.toLowerCase() !== (originalFetchedData.studentName || '').trim().toLowerCase();
+    const fatherChanged = currentFather.toLowerCase() !== (originalFetchedData.fatherName || '').trim().toLowerCase();
+    const genderChanged = currentGender.toLowerCase() !== (originalFetchedData.gender || '').trim().toLowerCase();
+    const dobChanged = currentDob !== (originalFetchedData.dob || '').trim();
+    const natChanged = currentNat.toLowerCase() !== (originalFetchedData.nationality || '').trim().toLowerCase();
+
+    const show10th = nameChanged;
+    const showTc = fatherChanged || genderChanged || dobChanged || natChanged;
+
+    document.getElementById('box10thProof').style.display = show10th ? 'block' : 'none';
+    document.getElementById('boxTcProof').style.display = showTc ? 'block' : 'none';
+    document.getElementById('proofUploadSection').style.display = (show10th || showTc) ? 'block' : 'none';
+  }
+
+  window.proceedToPhotoStep = function() {
+    const alertBox = document.getElementById('step2Alert');
+    alertBox.innerHTML = '';
+
+    if (!document.getElementById('chkDetailsConfirmed').checked) {
+      alertBox.innerHTML = `<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle-fill me-2"></i>Please confirm the declaration checkbox before proceeding.</div>`;
+      return;
+    }
+    if (!document.getElementById('displaySection').value.trim()) {
+      alertBox.innerHTML = `<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle-fill me-2"></i>Please enter your Section.</div>`;
+      return;
+    }
+    if (!document.getElementById('displayBatch').value) {
+      alertBox.innerHTML = `<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle-fill me-2"></i>Please select your Shift / Batch.</div>`;
+      return;
+    }
+
+    const currentName = document.getElementById('displayStudentName').value.trim();
+    const nameChanged = originalFetchedData && currentName.toLowerCase() !== (originalFetchedData.studentName || '').trim().toLowerCase();
+    if (nameChanged) {
+      const f10 = document.getElementById('proof10thFileInput');
+      if (!f10 || !f10.files || !f10.files[0]) {
+        alertBox.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-file-earmark-x-fill me-2"></i>Please upload your 10th Marksheet Proof Document for Name correction.</div>`;
+        return;
+      }
+    }
+
+    const currentFather = document.getElementById('displayFatherName').value.trim();
+    const currentGender = document.getElementById('selectGender').value.trim();
+    const currentDob = document.getElementById('inputDob').value.trim();
+    const currentNat = document.getElementById('displayNationality').value.trim();
+
+    const requiresTc = originalFetchedData && (
+      currentFather.toLowerCase() !== (originalFetchedData.fatherName || '').trim().toLowerCase() ||
+      currentGender.toLowerCase() !== (originalFetchedData.gender || '').trim().toLowerCase() ||
+      currentDob !== (originalFetchedData.dob || '').trim() ||
+      currentNat.toLowerCase() !== (originalFetchedData.nationality || '').trim().toLowerCase()
+    );
+
+    if (requiresTc) {
+      const fTc = document.getElementById('proofTcFileInput');
+      if (!fTc || !fTc.files || !fTc.files[0]) {
+        alertBox.innerHTML = `<div class="alert alert-danger py-2"><i class="bi bi-file-earmark-x-fill me-2"></i>Please upload your Transfer Certificate (TC) Proof Document for profile corrections.</div>`;
+        return;
+      }
+    }
+
+    document.getElementById('verificationSection').style.display = 'none';
+    document.getElementById('photoSection').style.display = 'block';
+  };
+
+  window.backToVerificationStep = function() {
+    document.getElementById('photoSection').style.display = 'none';
+    document.getElementById('verificationSection').style.display = 'block';
+  };
+
+  window.previewPhoto = function(input) {
+    const previewContainer = document.getElementById('photoPreviewContainer');
+    const photoAlert = document.getElementById('photoValidationAlert');
+    photoAlert.innerHTML = '';
+
+    if (input.files && input.files[0]) {
+      const file = input.files[0];
+      if (file.size > 80 * 1024) {
+        photoAlert.innerHTML = `<div class="alert alert-danger py-1 small mt-2"><i class="bi bi-exclamation-circle-fill me-1"></i>File size exceeds 80KB limit! (${(file.size/1024).toFixed(1)}KB). Please compress your image.</div>`;
+        input.value = "";
+        previewContainer.innerHTML = `<i class="bi bi-person text-secondary fs-1"></i>`;
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        previewContainer.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded" style="max-height: 100%; object-fit: cover;">`;
+      };
+      reader.readAsDataURL(file);
+    } else {
+      previewContainer.innerHTML = `<i class="bi bi-person text-secondary fs-1"></i>`;
+    }
+  };
+
+  window.handleVerifiedSubmission = async function(event) {
+    if (event) event.preventDefault();
+    const submitBtn = document.getElementById('submitBtn');
+    const alertBox = document.getElementById('submitAlert');
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Submitting Application...`;
+    alertBox.innerHTML = '';
+
+    try {
+      const photoFileInput = document.getElementById('photoFileInput');
+      const photoFile = photoFileInput.files ? photoFileInput.files[0] : null;
+      const photoBase64 = photoFile ? await convertFileToBase64(photoFile) : null;
+
+      const input10th = document.getElementById('proof10thFileInput');
+      const inputTc = document.getElementById('proofTcFileInput');
+
+      const file10th = (input10th && input10th.files && input10th.files[0]) ? input10th.files[0] : null;
+      const fileTc = (inputTc && inputTc.files && inputTc.files[0]) ? inputTc.files[0] : null;
+
+      const proof10thBase64 = file10th ? await convertFileToBase64(file10th) : null;
+      const proofTcBase64 = fileTc ? await convertFileToBase64(fileTc) : null;
+
+      const currentName = document.getElementById('displayStudentName').value.trim();
+      const currentFather = document.getElementById('displayFatherName').value.trim();
+      const currentGender = document.getElementById('selectGender').value.trim();
+      const currentDob = document.getElementById('inputDob').value.trim();
+      const currentNat = document.getElementById('displayNationality').value.trim();
+
+      const payload = {
+        action: "submitStudentApplication",
+        registerNumber: document.getElementById('displayRegNo').value,
+        studentEmail: document.getElementById('displayEmail').value,
+        studentName: currentName,
+        fatherName: currentFather,
+        gender: currentGender,
+        dob: currentDob,
+        nationality: currentNat,
+        department: document.getElementById('displayBranch').value,
+        specialization: document.getElementById('displaySpecialization').value,
+        section: document.getElementById('displaySection').value,
+        batch: document.getElementById('displayBatch').value,
+        
+        isNameCorrected: originalFetchedData ? currentName.toLowerCase() !== (originalFetchedData.studentName || '').trim().toLowerCase() : false,
+        isFatherCorrected: originalFetchedData ? currentFather.toLowerCase() !== (originalFetchedData.fatherName || '').trim().toLowerCase() : false,
+        isGenderCorrected: originalFetchedData ? currentGender.toLowerCase() !== (originalFetchedData.gender || '').trim().toLowerCase() : false,
+        isDobCorrected: originalFetchedData ? currentDob !== (originalFetchedData.dob || '').trim() : false,
+        isNationalityCorrected: originalFetchedData ? currentNat.toLowerCase() !== (originalFetchedData.nationality || '').trim().toLowerCase() : false,
+
+        photoData: photoBase64,
+        proof10thData: proof10thBase64,
+        proof10thMime: file10th ? file10th.type : null,
+        proofTcData: proofTcBase64,
+        proofTcMime: fileTc ? fileTc.type : null
+      };
+
+      const response = await fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      const res = await response.json();
+
+      if (res.success) {
+        alertBox.innerHTML = `
+          <div class="alert alert-success p-3 rounded-3 shadow-sm">
+            <i class="bi bi-check-circle-fill me-2"></i> Application submitted successfully! Tracking Ref ID: <strong>${res.trackingId || 'OK'}</strong>
+          </div>`;
+        document.getElementById('studentVerificationForm').reset();
+        document.getElementById('photoSection').style.display = 'none';
+        document.getElementById('photoPreviewContainer').innerHTML = `<i class="bi bi-person text-secondary fs-1"></i>`;
+      } else {
+        alertBox.innerHTML = `
+          <div class="alert alert-danger p-3 rounded-3 shadow-sm">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i> Submission failed: ${res.message}
+          </div>`;
+      }
+    } catch (err) {
+      alertBox.innerHTML = `
+        <div class="alert alert-danger p-3 rounded-3 shadow-sm">
+          <i class="bi bi-exclamation-octagon-fill me-2"></i> Error submitting application: ${err.message}
+        </div>`;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `Final Submit Application`;
+    }
+    return false;
+  };
+
+  function convertFileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = error => reject(error);
+    });
+  }
+
+  window.checkStatus = async function() {
+    const query = document.getElementById('trackSearchInput').value.trim();
+    const resBox = document.getElementById('statusResult');
+    if (!query) return;
+
+    resBox.innerHTML = `<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>`;
+
+    try {
+      const response = await fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "checkSubmissionStatus", query: query })
+      });
+      const res = await response.json();
+
+      if (res.success && res.data) {
+        const d = res.data;
+        const statusBadge = d.appStatus || d.status || 'PENDING_TEACHER';
+        const isRejected = statusBadge.startsWith('REJECTED');
+        const isApproved = statusBadge === 'APPROVED';
+        const badgeColor = isApproved ? 'success' : isRejected ? 'danger' : 'warning text-dark';
+
+        resBox.innerHTML = `
+          <div class="card border-0 bg-light p-3 rounded-3 shadow-sm">
+            <h6 class="fw-bold mb-2">Application Status: <span class="badge bg-${badgeColor}">${statusBadge}</span></h6>
+            <div class="small text-muted mb-2"><strong>Register No:</strong> ${d.regNo} | <strong>Name:</strong> ${d.name} | <strong>Batch:</strong> ${d.batch || 'Batch A'}</div>
+            <p class="mb-1"><strong>Correction / Review Notes:</strong> ${d.valStatus || 'None'}</p>
+            <hr class="my-2">
+            <div class="small">
+              <div><strong>Teacher Remarks:</strong> ${d.teacherRemarks || 'Pending'}</div>
+              <div><strong>HOD Remarks:</strong> ${d.hodRemarks || 'Pending'}</div>
+            </div>
+            ${isRejected ? `<div class="alert alert-danger mt-3 mb-0 py-2 small">Action Required: Your photo or details were rejected. Please re-submit your application.</div>` : ''}
+          </div>`;
+      } else {
+        resBox.innerHTML = `<div class="alert alert-info py-2">No application record found for: ${query}</div>`;
+      }
+    } catch (err) {
+      resBox.innerHTML = `<div class="alert alert-danger py-2">Error loading status: ${err.message}</div>`;
+    }
+  };
+</script>
+
+</body>
+</html>

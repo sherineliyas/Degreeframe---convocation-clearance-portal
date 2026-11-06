@@ -15,6 +15,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { api } from '../services/api';
+import { storage } from '../services/store';
 import { UserManualModal } from './UserManualModal';
 import { CoeOverviewStats } from '../types';
 
@@ -570,26 +571,55 @@ export const SuperAdminPortal: React.FC = () => {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
               <span className="text-xs font-semibold text-slate-500 block mb-1">Total University Students</span>
               <div className="text-2xl font-extrabold text-slate-900">{stats.totalStudents}</div>
-              <span className="text-[10px] text-slate-400 mt-1 block">Across all engineering & non-engineering streams</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
               <span className="text-xs font-semibold text-slate-500 block mb-1">Convocation Photo Submissions</span>
               <div className="text-2xl font-extrabold text-slate-900">{stats.totalSubmissions}</div>
-              <span className="text-[10px] text-slate-400 mt-1 block">Submitted degree passport photos</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
               <span className="text-xs font-semibold text-slate-500 block mb-1">Approved Degrees</span>
               <div className="text-2xl font-extrabold text-emerald-700">{stats.approved}</div>
-              <span className="text-[10px] text-slate-400 mt-1 block">Cleared for final print</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
               <span className="text-xs font-semibold text-slate-500 block mb-1">Total Department HODs</span>
               <div className="text-2xl font-extrabold text-purple-700">{stats.totalHods}</div>
-              <span className="text-[10px] text-slate-400 mt-1 block">Assigned academic HODs</span>
             </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+              <h3 className="text-sm font-bold text-slate-900">System Configuration</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Active Google Apps Script Web App URL</label>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={storage.getConfig().scriptUrl}
+                            readOnly
+                            className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono"
+                        />
+                        <button
+                            onClick={async () => {
+                                const newUrl = prompt('Enter new Google Apps Script Web App URL:', storage.getConfig().scriptUrl);
+                                if (newUrl && newUrl.trim()) {
+                                    const cfg = storage.getConfig();
+                                    cfg.scriptUrl = newUrl.trim();
+                                    storage.saveConfig(cfg);
+                                    setNotification({ type: 'success', message: 'Script URL updated successfully.' });
+                                    loadData();
+                                }
+                            }}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
+                        >
+                            Update URL
+                        </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">Used for OTP dispatch fallback and sheet data sync.</p>
+                  </div>
+              </div>
           </div>
         </div>
       )}

@@ -1046,6 +1046,21 @@ export const api = {
 
   // Update ACOE Email or Name
   async updateAcoeUser(payload: { oldEmail: string; newEmail?: string; name?: string; otpEnabled?: boolean }): Promise<ApiResponse> {
+    const cleanOldEmail = String(payload.oldEmail || '').toLowerCase().trim();
+    const cleanNewEmail = payload.newEmail ? String(payload.newEmail).toLowerCase().trim() : cleanOldEmail;
+    const cleanName = payload.name ? String(payload.name).trim() : undefined;
+
+    const faculty = storage.getFaculty();
+    const idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanOldEmail);
+    if (idx >= 0) {
+      faculty[idx].email = cleanNewEmail;
+      if (cleanName) faculty[idx].name = cleanName;
+      if (typeof payload.otpEnabled === 'boolean') {
+        (faculty[idx] as any).otpEnabled = payload.otpEnabled;
+      }
+      storage.saveFaculty(faculty);
+    }
+
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/update-acoe'), {
@@ -1063,7 +1078,7 @@ export const api = {
     }
     return {
       success: true,
-      message: `ACOE details updated.`,
+      message: `ACOE details updated successfully.`,
     };
   },
 

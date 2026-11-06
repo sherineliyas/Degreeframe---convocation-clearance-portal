@@ -1876,10 +1876,10 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
     if (role === 'TEACHER') {
       if (sub.approvalStatus !== 'PENDING_TEACHER') return false;
       const matchDept = dept === 'ALL' || subDept === dept;
-      const matchSpec = spec === 'ALL' || subSpec === spec;
-      const matchSem = sem === 'ALL' || !subSem || subSem === sem;
+      const matchSpec = spec === 'ALL' || subSpec === spec || subSpec.includes(spec) || spec.includes(subSpec);
+      const matchSem = sem === 'ALL' || !subSem || subSem === sem || subSem.includes(sem) || sem.includes(subSem);
       const matchSec = sec === 'ALL' || subSec === sec;
-      const matchBatch = batch === 'ALL' || subBatch === batch;
+      const matchBatch = batch === 'ALL' || subBatch === batch || subBatch.includes(batch) || batch.includes(subBatch);
       return matchDept && matchSpec && matchSem && matchSec && matchBatch;
     } else if (role === 'HOD') {
       if (sub.approvalStatus !== 'PENDING_HOD') return false;

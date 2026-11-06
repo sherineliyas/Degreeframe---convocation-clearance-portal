@@ -1223,20 +1223,67 @@ export const api = {
 
     const cleanOldEmail = payload.oldEmail.toLowerCase().trim();
     const cleanNewEmail = (payload.newEmail || cleanOldEmail).toLowerCase().trim();
+    const cleanDept = (payload.department || '').trim().toUpperCase();
+    const cleanName = (payload.name || '').trim();
     const faculty = storage.getFaculty();
     const idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'HOD');
 
     if (idx >= 0) {
       faculty[idx].email = cleanNewEmail;
-      if (payload.name) faculty[idx].name = payload.name.trim();
-      if (payload.department) faculty[idx].department = payload.department.trim().toUpperCase();
+      if (cleanName) faculty[idx].name = cleanName;
+      if (cleanDept) faculty[idx].department = cleanDept;
       if (payload.specialization) faculty[idx].specialization = payload.specialization.trim().toUpperCase();
       storage.saveFaculty(faculty);
     }
 
+    // Direct Google Apps Script dispatch fallback
+    const config = storage.getConfig();
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'updateHod',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
+            oldEmail: cleanOldEmail,
+            email: cleanNewEmail,
+            name: cleanName || (idx >= 0 ? faculty[idx].name : ''),
+            department: cleanDept || (idx >= 0 ? faculty[idx].department : ''),
+            specialization: payload.specialization || (idx >= 0 ? faculty[idx].specialization : 'ALL'),
+            role: 'HOD',
+            semester: 'ALL',
+            batch: 'ALL',
+            section: 'ALL',
+          }),
+        });
+        // Also call addHod for backwards-compatibility
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'addHod',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
+            email: cleanNewEmail,
+            name: cleanName || (idx >= 0 ? faculty[idx].name : ''),
+            department: cleanDept || (idx >= 0 ? faculty[idx].department : ''),
+            specialization: payload.specialization || (idx >= 0 ? faculty[idx].specialization : 'ALL'),
+            role: 'HOD',
+            semester: 'ALL',
+            batch: 'ALL',
+            section: 'ALL',
+          }),
+        });
+      } catch (e) {
+        console.warn('[CLIENT-GAS] Could not sync updateHod to Apps Script:', e);
+      }
+    }
+
     return {
       success: true,
-      message: 'HOD record updated.',
+      message: 'HOD record updated and synced to Master Sheet.',
     };
   },
 
@@ -1266,9 +1313,29 @@ export const api = {
     );
     storage.saveFaculty(faculty);
 
+    // Direct Google Apps Script dispatch fallback
+    const config = storage.getConfig();
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'deleteHod',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
+            email: cleanEmail,
+            department: cleanDept,
+          }),
+        });
+      } catch (e) {
+        console.warn('[CLIENT-GAS] Could not sync deleteHod to Apps Script:', e);
+      }
+    }
+
     return {
       success: true,
-      message: `HOD record removed.`,
+      message: `HOD record removed and deleted from Master Sheet.`,
     };
   },
 

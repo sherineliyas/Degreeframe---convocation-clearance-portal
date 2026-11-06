@@ -9,6 +9,27 @@ let SPREADSHEET_ID = "1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ";
 // ==========================================
 
 function doGet(e) {
+  const action = (e && e.parameter && e.parameter.action) || "";
+  if (action === "getPhoto" || action === "photo") {
+    const fileId = (e && e.parameter && (e.parameter.fileId || e.parameter.id)) || "";
+    if (fileId) {
+      try {
+        const file = DriveApp.getFileById(fileId);
+        const blob = file.getBlob();
+        return ContentService.createTextOutput(JSON.stringify({
+          success: true,
+          mimeType: blob.getContentType(),
+          base64: Utilities.base64Encode(blob.getBytes())
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch (err) {
+        return ContentService.createTextOutput(JSON.stringify({
+          success: false,
+          error: err.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+  }
+
   return ContentService.createTextOutput(JSON.stringify({
     status: "online",
     message: "Convocation Photo Clearance Portal API Service is active."
@@ -33,6 +54,21 @@ function doPost(e) {
     let responseData = { success: false, message: "Invalid action requested." };
 
     switch (action) {
+      // ---------------- DRIVE IMAGE STREAMING ----------------
+      case "getPhoto":
+        try {
+          const file = DriveApp.getFileById(payload.fileId);
+          const blob = file.getBlob();
+          responseData = {
+            success: true,
+            mimeType: blob.getContentType(),
+            base64: Utilities.base64Encode(blob.getBytes())
+          };
+        } catch (err) {
+          responseData = { success: false, error: err.toString() };
+        }
+        break;
+
       // ---------------- AUTHENTICATION & OTP ACTIONS ----------------
       case "sendOtp":
         responseData = handleSendOtp(payload);
@@ -117,6 +153,30 @@ function doPost(e) {
       case "addAcoe":
       case "upsertFacultyMember":
         responseData = handleUpsertFacultyMember(payload);
+        break;
+
+      case "updateHod":
+        responseData = handleUpdateHod(payload);
+        break;
+
+      case "deleteHod":
+        responseData = handleDeleteHod(payload);
+        break;
+
+      case "updateClassTeacher":
+        responseData = handleUpdateClassTeacher(payload);
+        break;
+
+      case "deleteClassTeacher":
+        responseData = handleDeleteClassTeacher(payload);
+        break;
+
+      case "updateAcoe":
+        responseData = handleUpdateAcoe(payload);
+        break;
+
+      case "deleteAcoe":
+        responseData = handleDeleteAcoe(payload);
         break;
 
       case "syncMasterSheet":
@@ -960,6 +1020,172 @@ function handleUpsertFacultyMember(payload) {
     success: true,
     message: `${role} record for ${name} (${email}) saved to Faculty sheet.`
   };
+}
+
+// Dedicated HOD Update Handler (Updates Name, Email, Department, Scope in Master Sheet)
+function handleUpdateHod(payload) {
+  const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
+  const newEmail = String(payload.email || payload.newEmail || oldEmail).trim().toLowerCase();
+  const name = String(payload.name || "").trim();
+  const department = String(payload.department || "").trim().toUpperCase();
+  const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
+  const semester = "ALL";
+  const batch = "ALL";
+  const section = "ALL";
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  const rowData = [newEmail, name, "HOD", department, specialization, semester, batch, section];
+
+  // Match by oldEmail or by Department where role is HOD
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+    const rowDept = String(data[i][3] || "").trim().toUpperCase();
+
+    if (rowRole === "HOD" && (rowEmail === oldEmail || (department && rowDept === department))) {
+      sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      return {
+        success: true,
+        message: `HOD details for ${name} (${newEmail}) updated in Faculty sheet.`
+      };
+    }
+  }
+
+  sheet.appendRow(rowData);
+  return {
+    success: true,
+    message: `HOD record for ${name} (${newEmail}) added to Faculty sheet.`
+  };
+}
+
+// Dedicated HOD Deletion Handler
+function handleDeleteHod(payload) {
+  const email = String(payload.email || "").trim().toLowerCase();
+  const department = String(payload.department || "").trim().toUpperCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+    const rowDept = String(data[i][3] || "").trim().toUpperCase();
+
+    if (rowRole === "HOD" && (rowEmail === email || (department && rowDept === department))) {
+      sheet.deleteRow(i + 1);
+      return {
+        success: true,
+        message: `HOD row for ${email || department} deleted from Faculty sheet.`
+      };
+    }
+  }
+
+  return { success: false, message: "HOD not found in Faculty sheet." };
+}
+
+// Dedicated Class Teacher Update Handler
+function handleUpdateClassTeacher(payload) {
+  const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
+  const newEmail = String(payload.newEmail || payload.teacherEmail || oldEmail).trim().toLowerCase();
+  const name = String(payload.name || payload.teacherName || "").trim();
+  const department = String(payload.department || "").trim().toUpperCase();
+  const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
+  const semester = String(payload.semester || "VIII").trim().toUpperCase();
+  const batch = String(payload.batch || "Batch A").trim();
+  const section = String(payload.section || "A").trim().toUpperCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  const rowData = [newEmail, name, "TEACHER", department, specialization, semester, batch, section];
+
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "TEACHER" && rowEmail === oldEmail) {
+      sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      return {
+        success: true,
+        message: `Class Teacher ${name} (${newEmail}) updated in Faculty sheet.`
+      };
+    }
+  }
+
+  sheet.appendRow(rowData);
+  return { success: true, message: `Class Teacher ${name} (${newEmail}) saved to Faculty sheet.` };
+}
+
+// Dedicated Class Teacher Deletion Handler
+function handleDeleteClassTeacher(payload) {
+  const email = String(payload.teacherEmail || payload.email || "").trim().toLowerCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "TEACHER" && rowEmail === email) {
+      sheet.deleteRow(i + 1);
+      return {
+        success: true,
+        message: `Class Teacher ${email} removed from Faculty sheet.`
+      };
+    }
+  }
+
+  return { success: false, message: "Class Teacher not found in Faculty sheet." };
+}
+
+// Dedicated ACOE Update Handler
+function handleUpdateAcoe(payload) {
+  const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
+  const newEmail = String(payload.newEmail || oldEmail).trim().toLowerCase();
+  const name = String(payload.name || "").trim();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "ACOE" && rowEmail === oldEmail) {
+      sheet.getRange(i + 1, 1).setValue(newEmail);
+      if (name) sheet.getRange(i + 1, 2).setValue(name);
+      return { success: true, message: `ACOE updated in Faculty sheet.` };
+    }
+  }
+  return { success: false, message: "ACOE not found in Faculty sheet." };
+}
+
+// Dedicated ACOE Deletion Handler
+function handleDeleteAcoe(payload) {
+  const email = String(payload.email || "").trim().toLowerCase();
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
+  if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+    const rowRole = String(data[i][2] || "").trim().toUpperCase();
+
+    if (rowRole === "ACOE" && rowEmail === email) {
+      sheet.deleteRow(i + 1);
+      return { success: true, message: `ACOE removed from Faculty sheet.` };
+    }
+  }
+  return { success: false, message: "ACOE not found in Faculty sheet." };
 }
 
 // Fetch all 3 tabs (Student_data, Faculty, Submissions) from the Master Google Sheet

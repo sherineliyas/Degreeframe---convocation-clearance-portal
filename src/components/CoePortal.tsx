@@ -29,7 +29,7 @@ import { api } from '../services/api';
 import { UserManualModal } from './UserManualModal';
 import { FacultyRecord, SubmissionRecord, CoeSettings, CoeOverviewStats } from '../types';
 import { downloadMasterExcelTemplate } from '../utils/excelTemplate';
-import { formatDriveImageUrl, extractDriveFileId, DEFAULT_AVATAR_SVG } from '../utils/imageUtils';
+import { formatDriveImageUrl, extractDriveFileId, DEFAULT_AVATAR_SVG, handlePassportImageError } from '../utils/imageUtils';
 
 interface CoeUserInfo {
   email: string;
@@ -1855,16 +1855,8 @@ export const CoePortal: React.FC = () => {
                               alt={sub.registerNumber}
                               referrerPolicy="no-referrer"
                               loading="lazy"
-                              className="w-9 h-11 object-cover rounded-md border border-slate-200 shadow-2xs"
-                              onError={(e: any) => {
-                                e.target.onerror = null;
-                                const fid = extractDriveFileId(sub.finalDriveUrl);
-                                if (fid && !e.target.src.includes('lh3.googleusercontent.com')) {
-                                  e.target.src = `https://lh3.googleusercontent.com/d/${fid}=s800`;
-                                } else {
-                                  e.target.src = DEFAULT_AVATAR_SVG;
-                                }
-                              }}
+                              className="w-9 h-11 object-cover rounded-md border border-slate-200 shadow-2xs bg-slate-100"
+                              onError={(e) => handlePassportImageError(e, sub.finalDriveUrl)}
                             />
                           ) : (
                             <div className="w-9 h-11 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] text-slate-400">
@@ -1962,16 +1954,8 @@ export const CoePortal: React.FC = () => {
                     src={formatDriveImageUrl(inspectRecord.finalDriveUrl)}
                     alt={inspectRecord.studentName}
                     referrerPolicy="no-referrer"
-                    className="w-36 h-44 object-cover rounded-xl border border-slate-200 shadow-md mx-auto"
-                    onError={(e: any) => {
-                      e.target.onerror = null;
-                      const fid = extractDriveFileId(inspectRecord.finalDriveUrl);
-                      if (fid && !e.target.src.includes('lh3.googleusercontent.com')) {
-                        e.target.src = `https://lh3.googleusercontent.com/d/${fid}=s800`;
-                      } else {
-                        e.target.src = DEFAULT_AVATAR_SVG;
-                      }
-                    }}
+                    className="w-36 h-44 object-cover rounded-xl border border-slate-200 shadow-md mx-auto bg-slate-100"
+                    onError={(e) => handlePassportImageError(e, inspectRecord.finalDriveUrl)}
                   />
                 ) : (
                   <div className="w-36 h-44 bg-slate-100 rounded-xl border border-slate-200 flex items-center justify-center text-xs text-slate-400 mx-auto">

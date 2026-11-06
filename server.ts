@@ -506,29 +506,58 @@ async function syncFromMasterSheet(force = false): Promise<boolean> {
     }
 
     if (subRows && subRows.length > 1) {
-      submissionsData = subRows.slice(1).filter((r) => r[2]).map((r, idx) => ({
-        submissionId: r[0] || `sub-${idx}`,
-        studentEmail: (r[1] || '').toLowerCase(),
-        registerNumber: r[2] || '',
-        studentName: r[3] || '',
-        fatherName: r[4] || '',
-        gender: r[5] || '',
-        dob: r[6] || '',
-        nationality: r[7] || '',
-        departmentBranch: (r[8] || '').toUpperCase(),
-        specialization: (r[9] || '').toUpperCase(),
-        semester: (r[10] || 'VIII').toUpperCase(),
-        section: (r[11] || 'A').toUpperCase(),
-        batch: r[12] || 'Batch A',
-        photoUpload: r[13] || `${r[2]}.jpg`,
-        finalDriveUrl: r[14] || '',
-        proof10thUrl: r[15] || '',
-        proofTcUrl: r[16] || '',
-        validationNotes: r[17] || '',
-        approvalStatus: ((r[18] || 'PENDING_TEACHER').toUpperCase()) as any,
-        teacherRemarks: r[19] || '',
-        hodRemarks: r[20] || '',
-        deanRemarks: r[21] || '',
+      const headers = subRows[0].map((h) => (h || '').trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+      const getCol = (names: string[], fallbackIdx: number) => {
+        const idx = headers.findIndex((h) => names.some((n) => h.includes(n)));
+        return idx >= 0 ? idx : fallbackIdx;
+      };
+
+      const cId = getCol(['submissionid'], 0);
+      const cEmail = getCol(['studentemail', 'email'], 1);
+      const cReg = getCol(['registernumber', 'regno', 'register'], 2);
+      const cName = getCol(['studentname', 'name'], 3);
+      const cFather = getCol(['fathername', 'father'], 4);
+      const cGender = getCol(['gender'], 5);
+      const cDob = getCol(['dob', 'dateofbirth'], 6);
+      const cNat = getCol(['nationality'], 7);
+      const cDept = getCol(['departmentbranch', 'branch', 'department', 'dept'], 8);
+      const cSpec = getCol(['specialization', 'spec'], 9);
+      const cSem = getCol(['semester', 'sem'], -1);
+      const cSec = getCol(['section', 'sec'], 10);
+      const cBatch = getCol(['batch'], 11);
+      const cPhoto = getCol(['photoupload', 'photo'], 12);
+      const cDrive = getCol(['finaldriveurl', 'driveurl', 'drive', 'finaldrive'], 13);
+      const cP10 = getCol(['proof10thurl', 'proof10th', '10th'], 14);
+      const cPTc = getCol(['prooftcurl', 'prooftc', 'tc'], 15);
+      const cNotes = getCol(['validationnotes', 'notes', 'correction'], 16);
+      const cStatus = getCol(['approvalstatus', 'status'], 17);
+      const cTeachRem = getCol(['teacherremarks', 'teacher'], 18);
+      const cHodRem = getCol(['hodremarks', 'hod'], 19);
+      const cDeanRem = getCol(['deanremarks', 'dean'], 20);
+
+      submissionsData = subRows.slice(1).filter((r) => r[cReg] || r[2]).map((r, idx) => ({
+        submissionId: r[cId] || `sub-${idx}`,
+        studentEmail: (r[cEmail] || '').toLowerCase(),
+        registerNumber: r[cReg] || '',
+        studentName: r[cName] || '',
+        fatherName: r[cFather] || '',
+        gender: r[cGender] || '',
+        dob: r[cDob] || '',
+        nationality: r[cNat] || '',
+        departmentBranch: (r[cDept] || '').toUpperCase(),
+        specialization: (r[cSpec] || '').toUpperCase(),
+        semester: (cSem >= 0 && r[cSem] ? r[cSem] : 'VIII').toUpperCase(),
+        section: (r[cSec] || 'A').toUpperCase(),
+        batch: r[cBatch] || 'Batch A',
+        photoUpload: r[cPhoto] || `${r[cReg] || 'student'}.jpg`,
+        finalDriveUrl: r[cDrive] || '',
+        proof10thUrl: r[cP10] || '',
+        proofTcUrl: r[cPTc] || '',
+        validationNotes: r[cNotes] || '',
+        approvalStatus: ((r[cStatus] || 'PENDING_TEACHER').toUpperCase()) as any,
+        teacherRemarks: r[cTeachRem] || '',
+        hodRemarks: r[cHodRem] || '',
+        deanRemarks: r[cDeanRem] || '',
         submittedAt: new Date().toISOString(),
       }));
     }
@@ -1132,7 +1161,7 @@ app.post('/api/coe/toggle-otp', (req: Request, res: Response) => {
 });
 
 // Update ACOE Email / Info (Super Admin Action)
-app.post('/api/coe/update-acoe', (req: Request, res: Response) => {
+app.post('/api/coe/update-acoe', async (req: Request, res: Response) => {
   const { oldEmail, newEmail, name, otpEnabled } = req.body;
   const cleanOldEmail = String(oldEmail || '').toLowerCase().trim();
   const cleanNewEmail = String(newEmail || cleanOldEmail).toLowerCase().trim();
@@ -1155,6 +1184,21 @@ app.post('/api/coe/update-acoe', (req: Request, res: Response) => {
 
   saveCoeUsersToDisk();
 
+  // Sync with facultyData
+  const facIdx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && (f.role === 'COE' || String(f.role) === 'ACOE'));
+  if (facIdx >= 0) {
+    facultyData[facIdx].email = user.email;
+    if (cleanName) facultyData[facIdx].name = user.name;
+    saveFacultyToDisk();
+  }
+
+  // Sync to Master Sheet Faculty tab
+  await callGoogleAppsScript('updateAcoe', {
+    oldEmail: cleanOldEmail,
+    newEmail: user.email,
+    name: user.name,
+  });
+
   return res.json({
     success: true,
     message: `ACOE User ${user.name} details updated successfully.`,
@@ -1163,7 +1207,7 @@ app.post('/api/coe/update-acoe', (req: Request, res: Response) => {
 });
 
 // Delete / Remove ACOE User (Super Admin Action)
-app.post('/api/coe/delete-acoe', (req: Request, res: Response) => {
+app.post('/api/coe/delete-acoe', async (req: Request, res: Response) => {
   const { email } = req.body;
   const cleanEmail = String(email || '').toLowerCase().trim();
 
@@ -1175,9 +1219,17 @@ app.post('/api/coe/delete-acoe', (req: Request, res: Response) => {
   const removed = coeUsersData.splice(idx, 1)[0];
   saveCoeUsersToDisk();
 
+  const facIdx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanEmail && (f.role === 'COE' || String(f.role) === 'ACOE'));
+  if (facIdx >= 0) {
+    facultyData.splice(facIdx, 1);
+    saveFacultyToDisk();
+  }
+
+  await callGoogleAppsScript('deleteAcoe', { email: cleanEmail });
+
   return res.json({
     success: true,
-    message: `ACOE user ${removed.name} (${removed.email}) removed from system.`,
+    message: `ACOE user ${removed.name} (${removed.email}) removed from system and Master Sheet.`,
   });
 });
 
@@ -1340,9 +1392,34 @@ app.post('/api/coe/update-hod', async (req: Request, res: Response) => {
   facultyData[idx] = updated;
   saveFacultyToDisk();
 
+  // Sync update directly to the Master Google Sheet Faculty tab
+  await callGoogleAppsScript('updateHod', {
+    oldEmail: cleanOldEmail,
+    email: cleanNewEmail,
+    name: updated.name,
+    role: 'HOD',
+    department: updated.department,
+    specialization: updated.specialization,
+    semester: 'ALL',
+    batch: 'ALL',
+    section: 'ALL',
+  });
+
+  // Also send addHod / upsertFacultyMember for backwards-compatibility with deployed scripts
+  await callGoogleAppsScript('addHod', {
+    email: cleanNewEmail,
+    name: updated.name,
+    role: 'HOD',
+    department: updated.department,
+    specialization: updated.specialization,
+    semester: 'ALL',
+    batch: 'ALL',
+    section: 'ALL',
+  });
+
   return res.json({
     success: true,
-    message: `HOD details for ${updated.name} (${updated.email}) updated successfully.`,
+    message: `HOD details for ${updated.name} (${updated.email}) updated successfully and saved to Master Sheet Faculty tab.`,
     hod: updated,
   });
 });
@@ -1364,9 +1441,15 @@ app.post('/api/coe/delete-hod', async (req: Request, res: Response) => {
   const removed = facultyData.splice(idx, 1)[0];
   saveFacultyToDisk();
 
+  // Delete row from Faculty sheet in Master Google Sheet
+  await callGoogleAppsScript('deleteHod', {
+    email: removed.email,
+    department: removed.department,
+  });
+
   return res.json({
     success: true,
-    message: `HOD ${removed.name} (${removed.email}) for department ${removed.department} removed.`,
+    message: `HOD ${removed.name} (${removed.email}) for department ${removed.department} removed and deleted from Master Sheet.`,
   });
 });
 
@@ -1645,6 +1728,20 @@ app.get('/api/student/status/:query', async (req: Request, res: Response) => {
   });
 });
 
+// In-memory cache for fetched passport photos (avoids repeated round trips)
+const photoCache = new Map<string, { buffer: Buffer; contentType: string; cachedAt: number }>();
+
+function extractDriveFileId(url: string | undefined | null): string {
+  if (!url || typeof url !== 'string') return '';
+  const clean = url.trim();
+  const matchFileD = clean.match(/\/(?:file\/)?d\/([a-zA-Z0-9_-]+)/);
+  if (matchFileD && matchFileD[1]) return matchFileD[1];
+  const matchId = clean.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (matchId && matchId[1]) return matchId[1];
+  if (/^[a-zA-Z0-9_-]{25,45}$/.test(clean)) return clean;
+  return '';
+}
+
 // Google Drive Image Proxy to bypass CORS, Referrer, and CSP restrictions for passport photos
 app.get('/api/drive/photo/:fileId', async (req: Request, res: Response) => {
   const fileId = String(req.params.fileId || '').trim();
@@ -1652,18 +1749,48 @@ app.get('/api/drive/photo/:fileId', async (req: Request, res: Response) => {
     return res.status(400).send('Invalid Google Drive File ID');
   }
 
-  // 1. Try Google's direct CDN (lh3.googleusercontent.com)
+  // 1. Return from in-memory cache if available (0ms instant response)
+  const cached = photoCache.get(fileId);
+  if (cached && Date.now() - cached.cachedAt < 24 * 60 * 60 * 1000) {
+    res.setHeader('Content-Type', cached.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    return res.send(cached.buffer);
+  }
+
+  // 2. Try Google's direct Thumbnail CDN (best performance & widest accessibility for Drive images)
   try {
-    const upstream = await fetch(`https://lh3.googleusercontent.com/d/${fileId}=s800`, {
+    const upstream = await fetch(`https://drive.google.com/thumbnail?id=${fileId}&sz=w800`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(6000),
     });
 
     const cType = upstream.headers.get('content-type') || '';
     if (upstream.ok && cType.includes('image')) {
       const buffer = Buffer.from(await upstream.arrayBuffer());
+      photoCache.set(fileId, { buffer, contentType: cType || 'image/jpeg', cachedAt: Date.now() });
+      res.setHeader('Content-Type', cType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      return res.send(buffer);
+    }
+  } catch (err: any) {
+    console.warn(`[IMAGE-PROXY] Thumbnail fetch failed for ${fileId}:`, err?.message || err);
+  }
+
+  // 3. Try Google's direct lh3 CDN
+  try {
+    const upstream = await fetch(`https://lh3.googleusercontent.com/d/${fileId}=s800`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      signal: AbortSignal.timeout(6000),
+    });
+
+    const cType = upstream.headers.get('content-type') || '';
+    if (upstream.ok && cType.includes('image')) {
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      photoCache.set(fileId, { buffer, contentType: cType || 'image/jpeg', cachedAt: Date.now() });
       res.setHeader('Content-Type', cType || 'image/jpeg');
       res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
       return res.send(buffer);
@@ -1672,33 +1799,28 @@ app.get('/api/drive/photo/:fileId', async (req: Request, res: Response) => {
     console.warn(`[IMAGE-PROXY] CDN fetch failed for ${fileId}:`, err?.message || err);
   }
 
-  // 2. Try direct Drive export URL
+  // 4. Try Apps Script Internal Drive Fetch (runs with Google Drive authorization of deployer)
   try {
-    const upstream = await fetch(`https://drive.google.com/uc?export=view&id=${fileId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(8000),
-    });
-
-    const cType = upstream.headers.get('content-type') || '';
-    if (upstream.ok && cType.includes('image')) {
-      const buffer = Buffer.from(await upstream.arrayBuffer());
-      res.setHeader('Content-Type', cType || 'image/jpeg');
+    const gasRes = await callGoogleAppsScript('getPhoto', { fileId });
+    if (gasRes && gasRes.success && gasRes.base64) {
+      const cleanB64 = gasRes.base64.includes('base64,') ? gasRes.base64.split('base64,')[1] : gasRes.base64;
+      const buffer = Buffer.from(cleanB64, 'base64');
+      const cType = gasRes.mimeType || 'image/jpeg';
+      photoCache.set(fileId, { buffer, contentType: cType, cachedAt: Date.now() });
+      res.setHeader('Content-Type', cType);
       res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
       return res.send(buffer);
     }
   } catch (err: any) {
-    console.warn(`[IMAGE-PROXY] Drive export fetch failed for ${fileId}:`, err?.message || err);
+    console.warn(`[IMAGE-PROXY] Apps Script getPhoto failed for ${fileId}:`, err?.message || err);
   }
 
-  // 3. Graceful SVG Placeholder with HTTP 200 (never broken image)
+  // 5. Graceful SVG Placeholder with HTTP 200 (never broken image)
   const svgPlaceholder = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="360" viewBox="0 0 300 360" fill="#f8fafc">
     <rect width="300" height="360" rx="16" fill="#f1f5f9"/>
     <circle cx="150" cy="130" r="60" fill="#cbd5e1"/>
     <path d="M60 290 C60 220 100 200 150 200 C200 200 240 220 240 290 Z" fill="#cbd5e1"/>
-    <text x="150" y="325" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="600" fill="#64748b">Student Photo</text>
+    <text x="150" y="325" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#64748b">Student Photo</text>
   </svg>`;
   res.setHeader('Content-Type', 'image/svg+xml');
   res.setHeader('Cache-Control', 'public, max-age=3600');

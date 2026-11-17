@@ -206,6 +206,10 @@ function doPost(e) {
         responseData = handleGetConfig();
         break;
 
+      case "saveSuperAdminSecurity":
+        responseData = handleSaveSuperAdminSecurity(payload);
+        break;
+
       default:
         responseData = { success: false, message: `Unknown action: '${action}'` };
     }
@@ -233,12 +237,13 @@ function handleSendOtp(data) {
   const email = (data.email || "").toLowerCase().trim();
   if (!email) return { success: false, message: "Email address is required." };
 
-  // Allowed domain checks for students
+  // Allowed domain checks
+  const portalType = String(data.portalType || "").toLowerCase().trim();
   const isStudentOfficialDomain = email.endsWith("@student.hindustanuniv.ac.in");
   const isFacultyOfficialDomain = email.endsWith("@hindustanuniv.ac.in");
   const isPersonalGmail = email.endsWith("@gmail.com");
 
-  if (!isStudentOfficialDomain && !isFacultyOfficialDomain && !isPersonalGmail) {
+  if (portalType !== "superadmin_recovery" && portalType !== "coe" && !isStudentOfficialDomain && !isFacultyOfficialDomain && !isPersonalGmail) {
     return {
       success: false,
       message: "Please enter a valid university email (@student.hindustanuniv.ac.in / @hindustanuniv.ac.in) or Gmail (@gmail.com)."
@@ -1467,6 +1472,9 @@ function handleGetConfig() {
   const props = PropertiesService.getScriptProperties();
   const folderId = (props.getProperty("PARENT_FOLDER_ID") || DEFAULT_PARENT_FOLDER_ID).trim();
   const sheetId = (props.getProperty("SPREADSHEET_ID") || DEFAULT_SPREADSHEET_ID).trim();
+  const superAdminPassword = props.getProperty("SUPERADMIN_PASSWORD") || "";
+  const superAdminRecoveryEmail = props.getProperty("SUPERADMIN_RECOVERY_EMAIL") || "";
+  const superAdminIsDefault = props.getProperty("SUPERADMIN_IS_DEFAULT_PASSWORD") !== "false";
   return {
     success: true,
     config: {
@@ -1477,9 +1485,33 @@ function handleGetConfig() {
       academicYear: props.getProperty("ACADEMIC_YEAR") || "2024-2025",
       convocationBatch: props.getProperty("CONVOCATION_BATCH") || "34th Convocation Ceremony",
       isCustomized: props.getProperty("IS_CUSTOMIZED") === "true",
-      updatedAt: props.getProperty("UPDATED_AT") || ""
+      updatedAt: props.getProperty("UPDATED_AT") || "",
+      superAdminSecurity: {
+        password: superAdminPassword,
+        recoveryEmail: superAdminRecoveryEmail,
+        isDefaultPassword: superAdminIsDefault
+      }
     }
   };
 }
 
-
+function handleSaveSuperAdminSecurity(payload) {
+  const props = PropertiesService.getScriptProperties();
+  const updates = {};
+  if (typeof payload.password === "string" && payload.password.trim()) {
+    updates.SUPERADMIN_PASSWORD = String(payload.password).trim();
+  }
+  if (typeof payload.recoveryEmail === "string") {
+    updates.SUPERADMIN_RECOVERY_EMAIL = String(payload.recoveryEmail).trim().toLowerCase();
+  }
+  if (typeof payload.isDefaultPassword === "boolean") {
+    updates.SUPERADMIN_IS_DEFAULT_PASSWORD = payload.isDefaultPassword ? "true" : "false";
+  }
+  if (Object.keys(updates).length > 0) {
+    props.setProperties(updates);
+  }
+  return {
+    success: true,
+    message: "Super Admin security configuration saved."
+  };
+}

@@ -1041,7 +1041,11 @@ export const api = {
       };
     }
 
-    if (isSuper && password && password !== 'Admin@123') {
+    const savedSuperPass =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('superadmin_password_override') : null;
+    const expectedSuperPass = savedSuperPass || 'Admin@123';
+
+    if (isSuper && password !== expectedSuperPass) {
       return {
         success: false,
         message: 'Invalid Super Admin username or password.',
@@ -1054,6 +1058,9 @@ export const api = {
       ? 'Dr. Dycoe (ACOE)'
       : matchedLocal?.name || 'Controller of Examinations (ACOE)';
 
+    const savedRecoveryEmail =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('superadmin_recovery_email_override') || '' : '';
+
     return {
       success: true,
       message: `COE authentication successful as ${name}.`,
@@ -1063,7 +1070,8 @@ export const api = {
         name,
         role: isSuper ? 'SUPER_ADMIN' : 'ACOE',
         streamScope: 'ALL',
-        isDefaultPassword: password === 'Admin@123' || password === 'Acoe@123',
+        isDefaultPassword: isSuper ? expectedSuperPass === 'Admin@123' : password === 'Acoe@123',
+        recoveryEmail: isSuper ? savedRecoveryEmail : '',
       },
     };
   },
@@ -1347,26 +1355,210 @@ export const api = {
     };
   },
 
-  // Change COE Password
-  async changeCoePassword(identifier: string, newPassword: string): Promise<ApiResponse> {
+  // Change COE or Super Admin Password
+  async changeCoePassword(
+    identifier: string,
+    newPassword: string,
+    currentPassword?: string,
+    recoveryEmail?: string
+  ): Promise<ApiResponse> {
+    const cleanId = String(identifier || '').toLowerCase().trim();
+    const isSuperTarget = cleanId === 'superadmin' || cleanId.startsWith('superadmin@');
+
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/change-password'), {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ email: identifier, username: identifier, newPassword }),
+          body: JSON.stringify({
+            email: cleanId,
+            username: cleanId,
+            ...(typeof currentPassword === 'string' ? { currentPassword } : {}),
+            newPassword,
+            ...(typeof recoveryEmail === 'string' && recoveryEmail.trim()
+              ? { recoveryEmail: recoveryEmail.trim().toLowerCase() }
+              : {}),
+          }),
         });
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
+          const data: ApiResponse = await response.json();
+          if (data.success && isSuperTarget && typeof localStorage !== 'undefined') {
+            localStorage.setItem('superadmin_password_override', newPassword.trim());
+            if (typeof recoveryEmail === 'string' && recoveryEmail.trim()) {
+              localStorage.setItem('superadmin_recovery_email_override', recoveryEmail.trim().toLowerCase());
+            }
+          }
+          return data;
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    if (isSuperTarget && typeof currentPassword === 'string') {
+      const savedPass =
+        (typeof localStorage !== 'undefined' && localStorage.getItem('superadmin_password_override')) || 'Admin@123';
+      if (currentPassword.trim() !== savedPass) {
+        return { success: false, message: 'Current password is incorrect.' };
+      }
+    }
+    if (isSuperTarget && typeof localStorage !== 'undefined') {
+      localStorage.setItem('superadmin_password_override', newPassword.trim());
+      if (typeof recoveryEmail === 'string' && recoveryEmail.trim()) {
+        localStorage.setItem('superadmin_recovery_email_override', recoveryEmail.trim().toLowerCase());
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Password updated successfully.',
+    };
+  },
+
+  // Update Super Admin Recovery Email
+  async updateSuperAdminRecoveryEmail(recoveryEmail: string): Promise<ApiResponse & { recoveryEmail?: string }> {
+    const cleanRec = String(recoveryEmail || '').toLowerCase().trim();
+    if (!cleanRec || !cleanRec.includes('@')) {
+      return { success: false, message: 'Please enter a valid recovery email address.' };
+    }
+
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/coe/update-recovery-email'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ recoveryEmail: cleanRec }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data.success && typeof localStorage !== 'undefined') {
+            localStorage.setItem('superadmin_recovery_email_override', cleanRec);
+          }
+          return data;
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('superadmin_recovery_email_override', cleanRec);
+    }
+    return {
+      success: true,
+      message: `Super Admin recovery email updated to ${cleanRec}.`,
+      recoveryEmail: cleanRec,
+    };
+  },
+
+  // Super Admin Password Recovery: Send OTP to Authorized Recovery Email
+  async sendSuperAdminRecoveryOtp(email: string): Promise<ApiResponse> {
+    const cleanEmail = String(email || '').toLowerCase().trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, message: 'Please enter a valid email address.' };
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    simulatedOtps[`superadmin_recovery:${cleanEmail}`] = {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      portalType: 'superadmin_recovery',
+    };
+
+    if (canUseExpressApi()) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const response = await fetch(apiUrl('/api/auth/superadmin-send-recovery-otp'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ email: cleanEmail, clientOtp: otp }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
           return await response.json();
         }
       } catch {
         // Fallback
       }
     }
+
+    const config = storage.getConfig();
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
+      try {
+        const response = await fetch(config.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'sendOtp',
+            email: cleanEmail,
+            otp,
+            clientOtp: otp,
+            portalType: 'superadmin_recovery',
+          }),
+        });
+        const res = await response.json();
+        if (res.success) return res;
+      } catch {
+        // Ignore
+      }
+    }
+
+    return {
+      success: false,
+      message: 'Could not reach server to dispatch Super Admin recovery OTP email.',
+    };
+  },
+
+  // Super Admin Password Recovery: Verify OTP & Reset Password
+  async resetSuperAdminPassword(email: string, otp: string, newPassword: string): Promise<ApiResponse> {
+    const cleanEmail = String(email || '').toLowerCase().trim();
+    const inputOtp = String(otp || '').trim();
+    const cleanNewPass = String(newPassword || '').trim();
+
+    if (!cleanEmail || !inputOtp || !cleanNewPass) {
+      return { success: false, message: 'Recovery email, 6-digit OTP, and new password are required.' };
+    }
+
+    if (canUseExpressApi()) {
+      try {
+        const response = await fetch(apiUrl('/api/auth/superadmin-reset-password'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ email: cleanEmail, otp: inputOtp, newPassword: cleanNewPass }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.status !== 405 && contentType.includes('application/json')) {
+          const data: ApiResponse = await response.json();
+          if (data.success && typeof localStorage !== 'undefined') {
+            localStorage.setItem('superadmin_password_override', cleanNewPass);
+            localStorage.setItem('superadmin_recovery_email_override', cleanEmail);
+          }
+          return data;
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const stored = simulatedOtps[`superadmin_recovery:${cleanEmail}`];
+    if (!stored || stored.otp !== inputOtp || Date.now() > stored.expiresAt) {
+      return { success: false, message: 'Invalid or expired OTP code.' };
+    }
+    delete simulatedOtps[`superadmin_recovery:${cleanEmail}`];
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('superadmin_password_override', cleanNewPass);
+      localStorage.setItem('superadmin_recovery_email_override', cleanEmail);
+    }
+
     return {
       success: true,
-      message: 'Password updated successfully.',
+      message: 'Super Admin password reset successfully! You can now sign in with your new password.',
     };
   },
 

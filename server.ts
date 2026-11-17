@@ -186,6 +186,7 @@ interface CoeUserRecord {
   password?: string;
   isDefaultPassword?: boolean;
   otpEnabled?: boolean;
+  recoveryEmail?: string;
   addedAt?: string;
 }
 
@@ -444,39 +445,75 @@ function saveCoeConfigToDisk() {
 }
 
 let cloudConfigChecked = false;
+let superAdminSecurityChecked = false;
+
+function applyGasSuperAdminSecurity(sec: any) {
+  if (!sec || typeof sec !== 'object') return;
+  const superUser = coeUsersData.find((u) => u.role === 'SUPER_ADMIN' || u.username === 'superadmin');
+  if (!superUser) return;
+  let updated = false;
+  if (typeof sec.password === 'string' && sec.password.trim() && superUser.isDefaultPassword !== false) {
+    superUser.password = sec.password.trim();
+    superUser.isDefaultPassword = Boolean(sec.isDefaultPassword);
+    updated = true;
+  }
+  if (typeof sec.recoveryEmail === 'string' && sec.recoveryEmail.trim() && !superUser.recoveryEmail) {
+    superUser.recoveryEmail = sec.recoveryEmail.trim().toLowerCase();
+    updated = true;
+  }
+  if (updated) {
+    saveCoeUsersToDisk();
+  }
+}
+
 async function restoreCoeConfigFromGasIfNeeded() {
-  if (cloudConfigChecked || coeSettings.isCustomized || fs.existsSync(CONFIG_FILE_PATH)) {
+  const needsConfigRestore = !cloudConfigChecked && !coeSettings.isCustomized && !fs.existsSync(CONFIG_FILE_PATH);
+  const superUser = coeUsersData.find((u) => u.role === 'SUPER_ADMIN' || u.username === 'superadmin');
+  const needsSuperSecurityRestore =
+    !superAdminSecurityChecked &&
+    Boolean(superUser && superUser.isDefaultPassword !== false && (!superUser.password || superUser.password === 'Admin@123'));
+
+  if (!needsConfigRestore && !needsSuperSecurityRestore) {
     cloudConfigChecked = true;
+    superAdminSecurityChecked = true;
     return;
   }
+
   cloudConfigChecked = true;
+  superAdminSecurityChecked = true;
+
   try {
     const gasCfg = await callGoogleAppsScript('getConfig', {}, 5000);
     if (gasCfg && gasCfg.success && gasCfg.config) {
       const c = gasCfg.config;
-      let changed = false;
-      if (c.spreadsheetId && String(c.spreadsheetId).trim()) {
-        coeSettings.spreadsheetId = String(c.spreadsheetId).trim();
-        coeSettings.spreadsheetUrl =
-          c.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${coeSettings.spreadsheetId}/edit`;
-        changed = true;
+      if (needsConfigRestore) {
+        let changed = false;
+        if (c.spreadsheetId && String(c.spreadsheetId).trim()) {
+          coeSettings.spreadsheetId = String(c.spreadsheetId).trim();
+          coeSettings.spreadsheetUrl =
+            c.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${coeSettings.spreadsheetId}/edit`;
+          changed = true;
+        }
+        if (c.parentFolderId && String(c.parentFolderId).trim()) {
+          coeSettings.driveFolderId = String(c.parentFolderId).trim();
+          coeSettings.driveFolderUrl =
+            c.driveFolderUrl || `https://drive.google.com/drive/folders/${coeSettings.driveFolderId}`;
+          changed = true;
+        }
+        if (c.academicYear) coeSettings.academicYear = String(c.academicYear);
+        if (c.convocationBatch) coeSettings.convocationBatch = String(c.convocationBatch);
+        if (changed) {
+          coeSettings.isCustomized = Boolean(
+            c.isCustomized ||
+              coeSettings.spreadsheetId !== DEFAULT_SPREADSHEET_ID ||
+              coeSettings.driveFolderId !== DEFAULT_DRIVE_FOLDER_ID
+          );
+          coeSettings.updatedAt = c.updatedAt || new Date().toISOString();
+          saveCoeConfigToDisk();
+        }
       }
-      if (c.parentFolderId && String(c.parentFolderId).trim()) {
-        coeSettings.driveFolderId = String(c.parentFolderId).trim();
-        coeSettings.driveFolderUrl =
-          c.driveFolderUrl || `https://drive.google.com/drive/folders/${coeSettings.driveFolderId}`;
-        changed = true;
-      }
-      if (c.academicYear) coeSettings.academicYear = String(c.academicYear);
-      if (c.convocationBatch) coeSettings.convocationBatch = String(c.convocationBatch);
-      if (changed) {
-        coeSettings.isCustomized = Boolean(
-          c.isCustomized ||
-            coeSettings.spreadsheetId !== DEFAULT_SPREADSHEET_ID ||
-            coeSettings.driveFolderId !== DEFAULT_DRIVE_FOLDER_ID
-        );
-        coeSettings.updatedAt = c.updatedAt || new Date().toISOString();
-        saveCoeConfigToDisk();
+      if (c.superAdminSecurity) {
+        applyGasSuperAdminSecurity(c.superAdminSecurity);
       }
     }
   } catch {
@@ -1062,6 +1099,8 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
 
 // Dedicated COE Login Endpoint supporting Username/Email with Password or OTP (STRICT RBAC)
 app.post('/api/auth/coe-login', async (req: Request, res: Response) => {
+  await restoreCoeConfigFromGasIfNeeded();
+
   const identifier = String(req.body.usernameOrEmail || req.body.username || req.body.email || '').toLowerCase().trim();
   const password = String(req.body.password || '').trim();
   const inputOtp = String(req.body.otp || '').trim();
@@ -1105,9 +1144,9 @@ app.post('/api/auth/coe-login', async (req: Request, res: Response) => {
     });
   }
 
-  const isCorrectPassword = Boolean(
-    password && (password === coeUser.password || password === 'Admin@123' || password === 'Acoe@123')
-  );
+  const fallbackDefault = coeUser.role === 'SUPER_ADMIN' ? 'Admin@123' : 'Acoe@123';
+  const expectedPassword = coeUser.password || fallbackDefault;
+  const isCorrectPassword = Boolean(password && password === expectedPassword);
 
   const cachedOtp = otpCache[identifier] || (coeUser.email ? otpCache[coeUser.email] : undefined);
   let isOtpValid = Boolean(cachedOtp && cachedOtp.otp === inputOtp);
@@ -1149,7 +1188,159 @@ app.post('/api/auth/coe-login', async (req: Request, res: Response) => {
       role: coeUser.role,
       streamScope: coeUser.streamScope || 'ALL',
       isDefaultPassword: coeUser.isDefaultPassword || false,
+      recoveryEmail: coeUser.recoveryEmail || '',
     },
+  });
+});
+
+function getAuthorizedSuperAdminRecoveryEmails(superUser: CoeUserRecord): string[] {
+  const candidates = new Set<string>();
+  if (superUser.email) candidates.add(superUser.email.toLowerCase().trim());
+  if (superUser.recoveryEmail) candidates.add(superUser.recoveryEmail.toLowerCase().trim());
+  if (process.env.SUPERADMIN_RECOVERY_EMAIL) {
+    candidates.add(process.env.SUPERADMIN_RECOVERY_EMAIL.toLowerCase().trim());
+  }
+  if (process.env.SMTP_USER) {
+    candidates.add(process.env.SMTP_USER.toLowerCase().trim());
+  }
+  for (const u of coeUsersData) {
+    if (u.email && u.email.includes('@')) candidates.add(u.email.toLowerCase().trim());
+  }
+  for (const f of facultyData) {
+    const r = String(f.role || '').toUpperCase();
+    if (f.email && (r.includes('COE') || r.includes('SUPER'))) {
+      candidates.add(f.email.toLowerCase().trim());
+    }
+  }
+  return Array.from(candidates);
+}
+
+// Super Admin Password Recovery Step 1: Send OTP to Authorized Recovery Email
+app.post('/api/auth/superadmin-send-recovery-otp', async (req: Request, res: Response) => {
+  await restoreCoeConfigFromGasIfNeeded();
+
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const clientOtp = String(req.body.clientOtp || req.body.otp || '').trim();
+
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+  }
+
+  const superUser = coeUsersData.find((u) => u.role === 'SUPER_ADMIN' || u.username === 'superadmin');
+  if (!superUser) {
+    return res.status(404).json({ success: false, message: 'Super Admin account not found.' });
+  }
+
+  const authorizedEmails = getAuthorizedSuperAdminRecoveryEmails(superUser);
+  if (!authorizedEmails.includes(email)) {
+    return res.status(403).json({
+      success: false,
+      message: `Unauthorized recovery email (${email}). Use your configured Super Admin recovery email or a registered COE/ACOE official email.`,
+    });
+  }
+
+  const otp = /^\d{6}$/.test(clientOtp) ? clientOtp : Math.floor(100000 + Math.random() * 900000).toString();
+  otpCache[`superadmin_recovery:${email}`] = {
+    otp,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    role: 'superadmin_recovery',
+  };
+  otpCache[email] = {
+    otp,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    role: 'superadmin_recovery',
+  };
+
+  const dispatch = await sendOfficialOtpEmail(email, otp, 'coe');
+  if (!dispatch.success) {
+    const errorMsg = dispatch.error || 'SMTP delivery failed.';
+    return res.status(200).json({
+      success: false,
+      message: `Failed to deliver recovery OTP email from ${process.env.SMTP_USER || 'dycoe@hindustanuniv.ac.in'}. ${errorMsg}`,
+    });
+  }
+
+  return res.json({
+    success: true,
+    message: `Password recovery OTP sent to ${email}. Valid for 10 minutes.`,
+  });
+});
+
+// Super Admin Password Recovery Step 2: Verify OTP & Reset Password
+app.post('/api/auth/superadmin-reset-password', async (req: Request, res: Response) => {
+  await restoreCoeConfigFromGasIfNeeded();
+
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const inputOtp = String(req.body.otp || '').trim();
+  const newPassword = String(req.body.newPassword || '').trim();
+
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ success: false, message: 'Valid recovery email is required.' });
+  }
+  if (!/^\d{6}$/.test(inputOtp)) {
+    return res.status(400).json({ success: false, message: 'Please enter the 6-digit OTP sent to your email.' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 6 characters long.' });
+  }
+
+  const superUser = coeUsersData.find((u) => u.role === 'SUPER_ADMIN' || u.username === 'superadmin');
+  if (!superUser) {
+    return res.status(404).json({ success: false, message: 'Super Admin account not found.' });
+  }
+
+  const authorizedEmails = getAuthorizedSuperAdminRecoveryEmails(superUser);
+  if (!authorizedEmails.includes(email)) {
+    return res.status(403).json({
+      success: false,
+      message: `Unauthorized recovery email (${email}).`,
+    });
+  }
+
+  const rec = otpCache[`superadmin_recovery:${email}`] || otpCache[email];
+  let isValidOtp = Boolean(rec && rec.otp === inputOtp && Date.now() <= rec.expiresAt);
+
+  if (!isValidOtp) {
+    try {
+      const gasVerify = await callGoogleAppsScript('verifyOtp', {
+        email,
+        otp: inputOtp,
+        portalType: 'superadmin_recovery',
+      });
+      if (gasVerify && gasVerify.success) {
+        isValidOtp = true;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  if (!isValidOtp) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid or expired OTP code. Please request a new recovery OTP.',
+    });
+  }
+
+  delete otpCache[`superadmin_recovery:${email}`];
+  delete otpCache[email];
+
+  superUser.password = newPassword;
+  superUser.isDefaultPassword = false;
+  if (!superUser.recoveryEmail) {
+    superUser.recoveryEmail = email;
+  }
+  saveCoeUsersToDisk();
+
+  await callGoogleAppsScript('saveSuperAdminSecurity', {
+    password: superUser.password,
+    recoveryEmail: superUser.recoveryEmail || '',
+    isDefaultPassword: false,
+  });
+
+  return res.json({
+    success: true,
+    message: 'Super Admin password reset successfully! You can now sign in with your new password.',
   });
 });
 
@@ -1493,9 +1684,9 @@ app.post('/api/coe/delete-acoe', async (req: Request, res: Response) => {
   });
 });
 
-// Update / Change COE Password
-app.post('/api/coe/change-password', (req: Request, res: Response) => {
-  const { email, username, newPassword } = req.body;
+// Update / Change COE or Super Admin Password
+app.post('/api/coe/change-password', async (req: Request, res: Response) => {
+  const { email, username, currentPassword, newPassword, recoveryEmail } = req.body || {};
 
   const key = String(username || email || '').toLowerCase().trim();
   const cleanNewPass = String(newPassword || '').trim();
@@ -1515,13 +1706,76 @@ app.post('/api/coe/change-password', (req: Request, res: Response) => {
     return res.status(404).json({ success: false, message: 'User record not found.' });
   }
 
+  if (typeof currentPassword === 'string') {
+    const fallbackDefault = user.role === 'SUPER_ADMIN' ? 'Admin@123' : 'Acoe@123';
+    const expectedCurrent = user.password || fallbackDefault;
+    if (currentPassword.trim() !== expectedCurrent) {
+      return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
+    }
+  }
 
   user.password = cleanNewPass;
   user.isDefaultPassword = false;
+  if (typeof recoveryEmail === 'string' && recoveryEmail.trim()) {
+    const cleanRec = recoveryEmail.trim().toLowerCase();
+    if (!cleanRec.includes('@')) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid recovery email address.' });
+    }
+    user.recoveryEmail = cleanRec;
+  }
+
+  saveCoeUsersToDisk();
+
+  if (user.role === 'SUPER_ADMIN') {
+    await callGoogleAppsScript('saveSuperAdminSecurity', {
+      password: user.password,
+      recoveryEmail: user.recoveryEmail || '',
+      isDefaultPassword: false,
+    });
+  }
 
   return res.json({
     success: true,
-    message: 'COE Password updated successfully! Initial default password cleared.',
+    message:
+      user.role === 'SUPER_ADMIN'
+        ? 'Super Admin password updated and saved successfully!'
+        : 'COE Password updated successfully! Initial default password cleared.',
+    user: {
+      username: user.username || user.email.split('@')[0],
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      isDefaultPassword: false,
+      recoveryEmail: user.recoveryEmail || '',
+    },
+  });
+});
+
+// Update Super Admin Recovery Email
+app.post('/api/coe/update-recovery-email', async (req: Request, res: Response) => {
+  const cleanRec = String(req.body?.recoveryEmail || '').toLowerCase().trim();
+  if (!cleanRec || !cleanRec.includes('@')) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid recovery email address.' });
+  }
+
+  const superUser = coeUsersData.find((u) => u.role === 'SUPER_ADMIN' || u.username === 'superadmin');
+  if (!superUser) {
+    return res.status(404).json({ success: false, message: 'Super Admin account not found.' });
+  }
+
+  superUser.recoveryEmail = cleanRec;
+  saveCoeUsersToDisk();
+
+  await callGoogleAppsScript('saveSuperAdminSecurity', {
+    password: superUser.password || 'Admin@123',
+    recoveryEmail: cleanRec,
+    isDefaultPassword: Boolean(superUser.isDefaultPassword),
+  });
+
+  return res.json({
+    success: true,
+    message: `Super Admin recovery email updated to ${cleanRec}.`,
+    recoveryEmail: cleanRec,
   });
 });
 

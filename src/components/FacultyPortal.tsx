@@ -24,6 +24,31 @@ import {
   BookOpen,
 } from 'lucide-react';
 
+function splitDepartments(raw?: string): string[] {
+  return Array.from(
+    new Set(
+      String(raw || '')
+        .split(/[;,]+/)
+        .map((d) => d.trim().toUpperCase())
+        .filter((d) => Boolean(d) && d !== 'ALL')
+    )
+  );
+}
+
+function matchesDepartmentScope(scopeDept?: string, targetDept?: string): boolean {
+  const scopeRaw = String(scopeDept || 'ALL').trim().toUpperCase();
+  if (!scopeRaw || scopeRaw === 'ALL') return true;
+  const scopeList = splitDepartments(scopeRaw);
+  if (scopeList.length === 0) return true;
+
+  const targetRaw = String(targetDept || '').trim().toUpperCase();
+  if (!targetRaw || targetRaw === 'ALL') return false;
+  const targetList = splitDepartments(targetRaw);
+  if (targetList.length === 0) return false;
+
+  return targetList.some((t) => scopeList.includes(t));
+}
+
 function splitSpecializations(raw?: string): string[] {
   return String(raw || '')
     .split(/[;,]+/)
@@ -72,6 +97,7 @@ export const FacultyPortal: React.FC = () => {
   const [newTeacherData, setNewTeacherData] = useState({
     email: '',
     name: '',
+    department: '',
     specialization: 'ALL',
     semester: 'VIII',
     batch: 'Batch A',
@@ -151,10 +177,12 @@ export const FacultyPortal: React.FC = () => {
   const [assignedTeachers, setAssignedTeachers] = useState<FacultyRecord[]>([]);
   const [editingTeacherEmail, setEditingTeacherEmail] = useState<string | null>(null);
 
+  const hodDeptOptions = splitDepartments(currentFaculty?.department);
   const hodSpecOptions = splitSpecializations(currentFaculty?.specialization);
 
   const handleOpenAddTeacherModal = () => {
     setEditingTeacherEmail(null);
+    const defaultDept = hodDeptOptions[0] || currentFaculty?.department || '';
     const defaultSpec =
       hodSpecOptions.length === 1
         ? hodSpecOptions[0]
@@ -164,6 +192,7 @@ export const FacultyPortal: React.FC = () => {
     setNewTeacherData({
       email: '',
       name: '',
+      department: defaultDept,
       specialization: defaultSpec,
       semester: 'VIII',
       batch: 'Batch A',
@@ -178,6 +207,7 @@ export const FacultyPortal: React.FC = () => {
     setNewTeacherData({
       email: teacher.email || '',
       name: teacher.name || '',
+      department: teacher.department || hodDeptOptions[0] || currentFaculty?.department || '',
       specialization: teacher.specialization || 'ALL',
       semester: teacher.semester || 'VIII',
       batch: teacher.batch || 'Batch A',
@@ -216,6 +246,9 @@ export const FacultyPortal: React.FC = () => {
       if (res.success && Array.isArray(res.data)) {
         setApplications(res.data);
       }
+      if (res.faculty) {
+        setCurrentFaculty(res.faculty);
+      }
       if (res.assignedTeachers) {
         setAssignedTeachers(res.assignedTeachers);
       } else {
@@ -225,7 +258,7 @@ export const FacultyPortal: React.FC = () => {
           const localTeachers = storage.getFaculty().filter(
             (f) =>
               f.role === 'TEACHER' &&
-              f.department.toUpperCase() === targetDept &&
+              matchesDepartmentScope(targetDept, f.department) &&
               matchesSpecializationScope(targetSpec, f.specialization)
           );
           setAssignedTeachers(localTeachers);
@@ -285,6 +318,7 @@ export const FacultyPortal: React.FC = () => {
     setAddTeacherMsg(null);
 
     try {
+      const chosenDept = newTeacherData.department || hodDeptOptions[0] || currentFaculty.department;
       let res;
       if (editingTeacherEmail) {
         res = await api.updateClassTeacher({
@@ -292,7 +326,7 @@ export const FacultyPortal: React.FC = () => {
           oldEmail: editingTeacherEmail,
           newEmail: newTeacherData.email,
           name: newTeacherData.name,
-          department: currentFaculty.department,
+          department: chosenDept,
           specialization: newTeacherData.specialization,
           semester: newTeacherData.semester,
           batch: newTeacherData.batch,
@@ -303,7 +337,7 @@ export const FacultyPortal: React.FC = () => {
           hodEmail: currentFaculty.email,
           teacherEmail: newTeacherData.email,
           teacherName: newTeacherData.name,
-          department: currentFaculty.department,
+          department: chosenDept,
           specialization: newTeacherData.specialization,
           semester: newTeacherData.semester,
           batch: newTeacherData.batch,
@@ -320,6 +354,7 @@ export const FacultyPortal: React.FC = () => {
         setNewTeacherData({
           email: '',
           name: '',
+          department: hodDeptOptions[0] || currentFaculty.department,
           specialization: 'ALL',
           semester: 'VIII',
           batch: 'Batch A',
@@ -574,7 +609,12 @@ export const FacultyPortal: React.FC = () => {
                     <tbody className="divide-y divide-slate-100">
                       {assignedTeachers.map((t) => (
                         <tr key={t.email} className="hover:bg-slate-50/70">
-                          <td className="py-2.5 px-3 font-bold text-slate-900">{t.name}</td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            <div>{t.name}</div>
+                            {hodDeptOptions.length > 1 && (
+                              <div className="text-[10px] font-semibold text-amber-800">{t.department}</div>
+                            )}
+                          </td>
                           <td className="py-2.5 px-3 font-mono font-medium text-slate-700 text-[11px]">{t.email}</td>
                           <td className="py-2.5 px-3 font-semibold text-blue-700">
                             Sem {t.semester || 'VIII'} • Sec {t.section || 'A'}
@@ -936,14 +976,33 @@ export const FacultyPortal: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-semibold text-slate-600 mb-1">Department</label>
-                  <select
-                    value={currentFaculty.department}
-                    disabled
-                    className="w-full px-3 py-2 border border-slate-200 bg-slate-100 rounded-xl font-medium text-slate-700 cursor-not-allowed"
-                  >
-                    <option value={currentFaculty.department}>{currentFaculty.department}</option>
-                  </select>
+                  <label className="block font-semibold text-slate-700 mb-1">Department</label>
+                  {hodDeptOptions.length > 1 ? (
+                    <select
+                      value={newTeacherData.department || hodDeptOptions[0]}
+                      onChange={(e) => setNewTeacherData({ ...newTeacherData, department: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 bg-white rounded-xl font-medium text-slate-800"
+                    >
+                      {hodDeptOptions.map((deptOpt) => (
+                        <option key={deptOpt} value={deptOpt}>
+                          {deptOpt}
+                        </option>
+                      ))}
+                      {newTeacherData.department && !hodDeptOptions.includes(newTeacherData.department) && (
+                        <option value={newTeacherData.department}>{newTeacherData.department}</option>
+                      )}
+                    </select>
+                  ) : (
+                    <select
+                      value={hodDeptOptions[0] || currentFaculty.department}
+                      disabled
+                      className="w-full px-3 py-2 border border-slate-200 bg-slate-100 rounded-xl font-medium text-slate-700 cursor-not-allowed"
+                    >
+                      <option value={hodDeptOptions[0] || currentFaculty.department}>
+                        {hodDeptOptions[0] || currentFaculty.department}
+                      </option>
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Specialization</label>

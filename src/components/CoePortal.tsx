@@ -803,13 +803,17 @@ export const CoePortal: React.FC = () => {
     return true;
   });
 
-  // Unique departments for filter and HOD appointment (sourced from Student_data + fallback defaults)
+  // Unique departments for filter and HOD appointment (sourced from Student_data + HODs + fallback defaults)
   const departmentsList = Array.from(
     new Set([
       ...serverDepartments,
       ...storage.getStudents().map((s) => String(s.branch || '').trim().toUpperCase()).filter(Boolean),
+      ...hods
+        .flatMap((h) => String(h.department || '').split(/[;,]+/).map((d) => d.trim().toUpperCase()))
+        .filter((d) => Boolean(d) && d !== 'ALL'),
       'AERONAUTICAL ENGINEERING',
       'AEROSPACE ENGINEERING',
+      'BACHELOR OF COMPUTER APPLICATIONS',
       'COMPUTER SCIENCE AND ENGINEERING',
       'INFORMATION TECHNOLOGY',
       'MECHANICAL ENGINEERING',
@@ -821,16 +825,48 @@ export const CoePortal: React.FC = () => {
     ])
   ).sort();
 
+  const selectedHodDeptTokens = Array.from(
+    new Set(
+      hodForm.department
+        .split(/[;,]+/)
+        .map((d) => d.trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+
   const selectedDeptSpecializations = Array.from(
-    new Set([
-      ...(specializationsByDept[hodForm.department.toUpperCase()] || []),
-      ...storage
-        .getStudents()
-        .filter((s) => String(s.branch || '').trim().toUpperCase() === hodForm.department.toUpperCase())
-        .map((s) => String(s.specialization || '').trim().toUpperCase())
-        .filter((sp) => sp && sp !== 'GENERAL' && sp !== 'ALL'),
-    ])
+    new Set(
+      selectedHodDeptTokens.flatMap((deptToken) => [
+        ...(specializationsByDept[deptToken] || []),
+        ...storage
+          .getStudents()
+          .filter((s) => String(s.branch || '').trim().toUpperCase() === deptToken)
+          .map((s) => String(s.specialization || '').trim().toUpperCase())
+          .filter((sp) => sp && sp !== 'GENERAL' && sp !== 'ALL'),
+      ])
+    )
   ).sort();
+
+  const toggleHodDepartmentToken = (deptToken: string) => {
+    const cleanToken = deptToken.trim().toUpperCase();
+    if (!cleanToken) return;
+    if (cleanToken === 'ALL') {
+      setHodForm({ ...hodForm, department: 'ALL', specialization: 'ALL' });
+      return;
+    }
+    const currentTokens = hodForm.department
+      .split(/[;,]+/)
+      .map((d) => d.trim().toUpperCase())
+      .filter((d) => d && d !== 'ALL');
+    const exists = currentTokens.includes(cleanToken);
+    const nextTokens = exists
+      ? currentTokens.filter((t) => t !== cleanToken)
+      : [...currentTokens, cleanToken];
+    setHodForm({
+      ...hodForm,
+      department: nextTokens.length > 0 ? nextTokens.join(', ') : departmentsList[0] || 'AERONAUTICAL ENGINEERING',
+    });
+  };
 
   const toggleHodSpecializationToken = (specToken: string) => {
     const cleanToken = specToken.trim().toUpperCase();
@@ -1411,7 +1447,7 @@ export const CoePortal: React.FC = () => {
                 {editingHodTarget ? 'Edit Department HOD Details' : 'Appoint Department HOD Details'}
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                Assign the Head of Department (HOD) per academic branch or per specific specialization(s). Adding another specialization for the same HOD email automatically merges both specializations under their scope, while different specializations in the same department can each have their own HOD.
+                Assign the same HOD across multiple departments (either as separate entries or together in one entry), or appoint separate HODs for UG &amp; PG programs and specific specializations.
               </p>
             </div>
 
@@ -1455,13 +1491,24 @@ export const CoePortal: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Department / Academic Branch
+                    Quick Select Department / Branch
                   </label>
                   <select
-                    value={hodForm.department}
-                    onChange={(e) => setHodForm({ ...hodForm, department: e.target.value, specialization: 'ALL' })}
+                    value={selectedHodDeptTokens.length === 1 && departmentsList.includes(selectedHodDeptTokens[0]) ? selectedHodDeptTokens[0] : ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setHodForm({ ...hodForm, department: e.target.value, specialization: 'ALL' });
+                      }
+                    }}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
                   >
+                    {selectedHodDeptTokens.length !== 1 && (
+                      <option value="">
+                        {selectedHodDeptTokens.length > 1
+                          ? `Multiple Selected (${selectedHodDeptTokens.length} Depts)`
+                          : 'Select Primary Department...'}
+                      </option>
+                    )}
                     {departmentsList.map((dept) => (
                       <option key={dept} value={dept}>
                         {dept}
@@ -1472,16 +1519,63 @@ export const CoePortal: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Specialization Authority Scope
+                    Department Authority Scope *
                   </label>
                   <input
                     type="text"
-                    value={hodForm.specialization}
-                    onChange={(e) => setHodForm({ ...hodForm, specialization: e.target.value.toUpperCase() })}
-                    placeholder="ALL (or comma-separated specializations)"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                    value={hodForm.department}
+                    onChange={(e) => setHodForm({ ...hodForm, department: e.target.value.toUpperCase() })}
+                    placeholder="e.g. MASTER OF COMPUTER APPLICATIONS or BCA, MCA"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm uppercase focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                    required
                   />
                 </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-slate-600">
+                    Click to include one or multiple departments in this entry (or add separately per department):
+                  </span>
+                  {selectedHodDeptTokens.length > 1 && (
+                    <span className="text-[10px] font-bold text-purple-700">
+                      {selectedHodDeptTokens.length} departments selected
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
+                  {departmentsList.map((dept) => {
+                    const isSelected = selectedHodDeptTokens.includes(dept);
+                    return (
+                      <button
+                        key={dept}
+                        type="button"
+                        onClick={() => toggleHodDepartmentToken(dept)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-purple-700 text-white border-purple-700'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        {isSelected ? '✓ ' : '+ '}
+                        {dept}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Specialization Authority Scope
+                </label>
+                <input
+                  type="text"
+                  value={hodForm.specialization}
+                  onChange={(e) => setHodForm({ ...hodForm, specialization: e.target.value.toUpperCase() })}
+                  placeholder="ALL (or comma-separated specializations)"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
+                />
               </div>
 
               {selectedDeptSpecializations.length > 0 && (

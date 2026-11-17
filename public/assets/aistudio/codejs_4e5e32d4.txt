@@ -709,6 +709,61 @@ function matchesSpecializationScopeGas(scopeSpec, targetSpec) {
   return false;
 }
 
+function splitDepartmentsGas(raw) {
+  const parts = String(raw || "").split(/[;,]+/);
+  const result = [];
+  for (let i = 0; i < parts.length; i++) {
+    const clean = parts[i].trim().toUpperCase();
+    if (clean && result.indexOf(clean) === -1) {
+      result.push(clean);
+    }
+  }
+  return result;
+}
+
+function normalizeDepartmentListGas(raw) {
+  const list = splitDepartmentsGas(raw);
+  if (list.length === 0) return "";
+  if (list.indexOf("ALL") !== -1) return "ALL";
+  return list.join(", ");
+}
+
+function mergeDepartmentsGas(existingDept, incomingDept) {
+  const listA = splitDepartmentsGas(existingDept);
+  const listB = splitDepartmentsGas(incomingDept);
+  const combined = [];
+  for (let i = 0; i < listA.length; i++) {
+    if (combined.indexOf(listA[i]) === -1) combined.push(listA[i]);
+  }
+  for (let i = 0; i < listB.length; i++) {
+    if (combined.indexOf(listB[i]) === -1) combined.push(listB[i]);
+  }
+  if (combined.length === 0) return "ALL";
+  if (combined.indexOf("ALL") !== -1) return "ALL";
+  return combined.join(", ");
+}
+
+function sameDepartmentSetGas(a, b) {
+  const listA = splitDepartmentsGas(a).sort();
+  const listB = splitDepartmentsGas(b).sort();
+  if (listA.length !== listB.length) return false;
+  for (let i = 0; i < listA.length; i++) {
+    if (listA[i] !== listB[i]) return false;
+  }
+  return true;
+}
+
+function matchesDepartmentScopeGas(scopeDept, targetDept) {
+  const scopeList = splitDepartmentsGas(scopeDept);
+  if (scopeList.length === 0 || scopeList.indexOf("ALL") !== -1) return true;
+  const targetList = splitDepartmentsGas(targetDept);
+  if (targetList.length === 0) return false;
+  for (let i = 0; i < targetList.length; i++) {
+    if (scopeList.indexOf(targetList[i]) !== -1) return true;
+  }
+  return false;
+}
+
 function handleFacultyLogin(email) {
   const cleanEmail = String(email || "").trim().toLowerCase();
 
@@ -752,8 +807,10 @@ function handleFacultyLogin(email) {
     };
   }
 
+  let mergedDepartment = scopes[0].department || "ALL";
   let mergedSpecialization = scopes[0].specialization || "ALL";
   for (let s = 1; s < scopes.length; s++) {
+    mergedDepartment = mergeDepartmentsGas(mergedDepartment, scopes[s].department);
     mergedSpecialization = mergeSpecializationsGas(mergedSpecialization, scopes[s].specialization);
   }
 
@@ -763,7 +820,7 @@ function handleFacultyLogin(email) {
       email: cleanEmail,
       name: facultyName,
       role: primaryRole,
-      department: scopes[0].department,
+      department: mergedDepartment,
       specialization: mergedSpecialization,
       semester: scopes[0].semester,
       section: scopes[0].section,
@@ -806,7 +863,7 @@ function getSubmissionsForReview(payload) {
       const scope = scopes[s];
 
       if (scope.role === "TEACHER" && status === "PENDING_TEACHER") {
-        const matchDept = (scope.department === "ALL" || scope.department === dept);
+        const matchDept = matchesDepartmentScopeGas(scope.department, dept);
         const matchSpec = matchesSpecializationScopeGas(scope.specialization, spec);
         const matchSec = (scope.section === "ALL" || scope.section === sec);
         const matchBatch = (scope.batch === "ALL" || scope.batch === batch);
@@ -816,7 +873,7 @@ function getSubmissionsForReview(payload) {
           break;
         }
       } else if (scope.role === "HOD" && status === "PENDING_HOD") {
-        const matchDept = (scope.department === "ALL" || scope.department === dept);
+        const matchDept = matchesDepartmentScopeGas(scope.department, dept);
         const matchSpec = matchesSpecializationScopeGas(scope.specialization, spec);
         if (matchDept && matchSpec) {
           isEligible = true;
@@ -1058,7 +1115,8 @@ function handleUpsertFacultyMember(payload) {
   const email = String(payload.email || payload.teacherEmail || "").trim().toLowerCase();
   const name = String(payload.name || payload.teacherName || "").trim();
   const role = String(payload.role || "TEACHER").trim().toUpperCase();
-  const department = String(payload.department || payload.streamScope || "ALL").trim().toUpperCase();
+  const rawDept = String(payload.department || payload.streamScope || "ALL").trim().toUpperCase();
+  const department = normalizeDepartmentListGas(rawDept) || "ALL";
   const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
   const semester = String(payload.semester || "ALL").trim().toUpperCase();
   const batch = String(payload.batch || "ALL").trim();
@@ -1075,14 +1133,14 @@ function handleUpsertFacultyMember(payload) {
   const rowData = [email, name, role, department, specialization, semester, batch, section];
 
   if (role === "HOD") {
-    // 1. If the same HOD email + department already exists, merge the additional specialization (e.g. AI & DA + DATA SCIENCE)
+    // 1. If the same HOD email + same department set already exists, merge the additional specialization
     for (let i = 1; i < data.length; i++) {
       const rowEmail = String(data[i][0] || "").trim().toLowerCase();
       const rowRole = String(data[i][2] || "").trim().toUpperCase();
       const rowDept = String(data[i][3] || "").trim().toUpperCase();
       const rowSpec = String(data[i][4] || "ALL").trim().toUpperCase();
 
-      if (rowRole === "HOD" && rowEmail === email && rowDept === department) {
+      if (rowRole === "HOD" && rowEmail === email && sameDepartmentSetGas(rowDept, department)) {
         const mergedSpec = mergeSpecializationsGas(rowSpec, specialization);
         const updatedRow = [email, name, role, department, mergedSpec, semester, batch, section];
         sheet.getRange(i + 1, 1, 1, updatedRow.length).setValues([updatedRow]);
@@ -1093,13 +1151,13 @@ function handleUpsertFacultyMember(payload) {
       }
     }
 
-    // 2. If assigning a different HOD to the exact same department + specialization, update that specific entry
+    // 2. If assigning a different HOD to the exact same department set + specialization, update that specific entry
     for (let i = 1; i < data.length; i++) {
       const rowRole = String(data[i][2] || "").trim().toUpperCase();
       const rowDept = String(data[i][3] || "").trim().toUpperCase();
       const rowSpec = String(data[i][4] || "ALL").trim().toUpperCase();
 
-      if (rowRole === "HOD" && rowDept === department && rowSpec === specialization) {
+      if (rowRole === "HOD" && sameDepartmentSetGas(rowDept, department) && rowSpec === specialization) {
         sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
         return {
           success: true,
@@ -1144,11 +1202,11 @@ function handleUpsertFacultyMember(payload) {
 // Dedicated HOD Update Handler (Updates Name, Email, Department, Scope in Master Sheet)
 function handleUpdateHod(payload) {
   const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
-  const oldDepartment = String(payload.oldDepartment || "").trim().toUpperCase();
+  const oldDepartment = normalizeDepartmentListGas(payload.oldDepartment || "");
   const oldSpecialization = String(payload.oldSpecialization || "").trim().toUpperCase();
   const newEmail = String(payload.email || payload.newEmail || oldEmail).trim().toLowerCase();
   const name = String(payload.name || "").trim();
-  const department = String(payload.department || "").trim().toUpperCase();
+  const department = normalizeDepartmentListGas(payload.department || "");
   const specialization = String(payload.specialization || "ALL").trim().toUpperCase();
   const semester = "ALL";
   const batch = "ALL";
@@ -1170,13 +1228,13 @@ function handleUpdateHod(payload) {
     const matchesOldKey =
       oldEmail &&
       rowEmail === oldEmail &&
-      (!oldDepartment || rowDept === oldDepartment) &&
+      (!oldDepartment || sameDepartmentSetGas(rowDept, oldDepartment)) &&
       (!oldSpecialization || rowSpec === oldSpecialization);
 
     const matchesExactSlot =
       !oldEmail &&
       department &&
-      rowDept === department &&
+      sameDepartmentSetGas(rowDept, department) &&
       rowSpec === specialization;
 
     if (rowRole === "HOD" && (matchesOldKey || matchesExactSlot)) {
@@ -1198,7 +1256,7 @@ function handleUpdateHod(payload) {
 // Dedicated HOD Deletion Handler
 function handleDeleteHod(payload) {
   const email = String(payload.email || "").trim().toLowerCase();
-  const department = String(payload.department || "").trim().toUpperCase();
+  const department = normalizeDepartmentListGas(payload.department || "");
   const specialization = String(payload.specialization || "").trim().toUpperCase();
 
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
@@ -1212,7 +1270,7 @@ function handleDeleteHod(payload) {
     const rowSpec = String(data[i][4] || "ALL").trim().toUpperCase();
 
     const matchEmail = !email || rowEmail === email;
-    const matchDept = !department || rowDept === department;
+    const matchDept = !department || sameDepartmentSetGas(rowDept, department);
     const matchSpec = !specialization || rowSpec === specialization;
 
     if (rowRole === "HOD" && matchEmail && matchDept && matchSpec) {

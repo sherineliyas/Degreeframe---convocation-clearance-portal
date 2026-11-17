@@ -357,6 +357,48 @@ function matchesSpecializationScope(scopeSpecStr: string | undefined, targetSpec
   );
 }
 
+function splitDepartments(deptStr?: string): string[] {
+  return Array.from(
+    new Set(
+      String(deptStr || '')
+        .split(/[;,]+/)
+        .map((d) => d.trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeDepartmentList(deptStr?: string): string {
+  const list = splitDepartments(deptStr);
+  if (list.length === 0) return '';
+  if (list.includes('ALL')) return 'ALL';
+  return list.join(', ');
+}
+
+function mergeDepartments(existing?: string, added?: string): string {
+  const listA = splitDepartments(existing);
+  const listB = splitDepartments(added);
+  const combined = Array.from(new Set([...listA, ...listB]));
+  if (combined.length === 0) return 'ALL';
+  if (combined.includes('ALL')) return 'ALL';
+  return combined.join(', ');
+}
+
+function sameDepartmentSet(a?: string, b?: string): boolean {
+  const listA = splitDepartments(a).sort();
+  const listB = splitDepartments(b).sort();
+  if (listA.length !== listB.length) return false;
+  return listA.every((val, idx) => val === listB[idx]);
+}
+
+function matchesDepartmentScope(scopeDeptStr: string | undefined, targetDeptStr: string | undefined): boolean {
+  const scopeList = splitDepartments(scopeDeptStr);
+  if (scopeList.length === 0 || scopeList.includes('ALL')) return true;
+  const targetList = splitDepartments(targetDeptStr);
+  if (targetList.length === 0) return false;
+  return targetList.some((t) => scopeList.includes(t));
+}
+
 function extractStudentRegFromEmail(studentEmail?: string): string {
   const clean = String(studentEmail || '').toLowerCase().trim();
   if (!clean || !clean.includes('@')) return '';
@@ -1079,9 +1121,12 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
         message: `Access Denied: ${email} is not registered in the Faculty directory. Department HODs are appointed by COE and Class Teachers are appointed by HOD.`,
       });
     }
+    const mergedDept =
+      matchedRows.reduce((acc, r) => mergeDepartments(acc, r.department), '') || matchedRows[0].department;
     const mergedSpec = matchedRows.reduce((acc, r) => mergeSpecializations(acc, r.specialization), '') || 'ALL';
     const mergedFaculty: FacultyRecord = {
       ...matchedRows[0],
+      department: mergedDept,
       specialization: mergedSpec,
     };
     return res.json({
@@ -1359,8 +1404,18 @@ app.get('/api/coe/overview', async (req: Request, res: Response) => {
 
   const filteredStudents = studentData.filter((s) => matchesStreamScope(s.branch + ' ' + s.specialization, streamScope));
   const filteredSubmissions = submissionsData.filter((s) => matchesStreamScope(s.departmentBranch + ' ' + s.specialization, streamScope));
-  const filteredHods = facultyData.filter((f) => f.role === 'HOD' && matchesStreamScope(f.department + ' ' + f.specialization, streamScope));
-  const filteredTeachers = facultyData.filter((f) => f.role === 'TEACHER' && matchesStreamScope(f.department + ' ' + f.specialization, streamScope));
+  const filteredHods = facultyData.filter(
+    (f) =>
+      f.role === 'HOD' &&
+      (streamScope === 'ALL' ||
+        splitDepartments(f.department).some((d) => matchesStreamScope(d + ' ' + f.specialization, streamScope)))
+  );
+  const filteredTeachers = facultyData.filter(
+    (f) =>
+      f.role === 'TEACHER' &&
+      (streamScope === 'ALL' ||
+        splitDepartments(f.department).some((d) => matchesStreamScope(d + ' ' + f.specialization, streamScope)))
+  );
 
   const totalStudents = filteredStudents.length;
   const totalSubmissions = filteredSubmissions.length;
@@ -1389,6 +1444,11 @@ app.get('/api/coe/overview', async (req: Request, res: Response) => {
     const sp = String(s.specialization || '').trim().toUpperCase();
     if (sp && sp !== 'GENERAL' && sp !== 'ALL') {
       specMap[b].add(sp);
+    }
+  }
+  for (const h of filteredHods) {
+    for (const d of splitDepartments(h.department)) {
+      if (d && d !== 'ALL') deptSet.add(d);
     }
   }
   const departments = Array.from(deptSet).sort();
@@ -1865,13 +1925,13 @@ app.post('/api/coe/config', async (req: Request, res: Response) => {
   });
 });
 
-// COE UI: Add / Assign Department HOD (supports multiple HODs per dept for different specializations & merging specializations for same HOD)
+// COE UI: Add / Assign Department HOD (supports multi-department single entries, multiple entries for same HOD across departments, and distinct UG/PG HODs)
 app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
   const { email, name, department, specialization } = req.body;
 
   const cleanEmail = String(email || '').toLowerCase().trim();
   const cleanName = String(name || '').trim();
-  const cleanDept = String(department || '').trim().toUpperCase();
+  const cleanDept = normalizeDepartmentList(department);
   const cleanSpec = splitSpecializations(specialization || 'ALL').join(', ') || 'ALL';
 
   if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -1884,23 +1944,23 @@ app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
   if (!cleanName || !cleanDept) {
     return res.json({
       success: false,
-      message: 'HOD Name and Department are required.',
+      message: 'HOD Name and at least one Department are required.',
     });
   }
 
-  // 1. Same HOD email + same department -> merge specialization scope (e.g. AI & DA + DATA SCIENCE)
+  // 1. Same HOD email + exact same department set -> merge specialization scope (e.g. AI & DA + DATA SCIENCE)
   const sameHodIdx = facultyData.findIndex(
-    (f) => f.role === 'HOD' && f.email.toLowerCase() === cleanEmail && f.department.toUpperCase() === cleanDept
+    (f) => f.role === 'HOD' && f.email.toLowerCase() === cleanEmail && sameDepartmentSet(f.department, cleanDept)
   );
 
-  // 2. Different email, same department & exact same specialization -> replace that specialization's HOD
+  // 2. Different email, same department set & exact same specialization -> replace that slot's HOD
   const sameSpecIdx =
     sameHodIdx >= 0
       ? -1
       : facultyData.findIndex(
           (f) =>
             f.role === 'HOD' &&
-            f.department.toUpperCase() === cleanDept &&
+            sameDepartmentSet(f.department, cleanDept) &&
             (f.specialization || 'ALL').toUpperCase() === cleanSpec
         );
 
@@ -1954,17 +2014,17 @@ app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
 app.post('/api/coe/update-hod', async (req: Request, res: Response) => {
   const { oldEmail, oldDepartment, oldSpecialization, newEmail, name, department, specialization } = req.body;
   const cleanOldEmail = String(oldEmail || '').toLowerCase().trim();
-  const cleanOldDept = String(oldDepartment || '').trim().toUpperCase();
+  const cleanOldDept = normalizeDepartmentList(oldDepartment);
   const cleanOldSpec = String(oldSpecialization || '').trim().toUpperCase();
   const cleanNewEmail = String(newEmail || cleanOldEmail).toLowerCase().trim();
   const cleanName = String(name || '').trim();
-  const cleanDept = String(department || '').trim().toUpperCase();
+  const cleanDept = normalizeDepartmentList(department);
 
   let idx = facultyData.findIndex(
     (f) =>
       f.role === 'HOD' &&
       f.email.toLowerCase() === cleanOldEmail &&
-      (!cleanOldDept || f.department.toUpperCase() === cleanOldDept) &&
+      (!cleanOldDept || sameDepartmentSet(f.department, cleanOldDept)) &&
       (!cleanOldSpec || (f.specialization || 'ALL').toUpperCase() === cleanOldSpec)
   );
   if (idx < 0) {
@@ -2015,14 +2075,14 @@ app.post('/api/coe/update-hod', async (req: Request, res: Response) => {
 app.post('/api/coe/delete-hod', async (req: Request, res: Response) => {
   const { email, department, specialization } = req.body;
   const cleanEmail = String(email || '').toLowerCase().trim();
-  const cleanDept = String(department || '').trim().toUpperCase();
+  const cleanDept = normalizeDepartmentList(department);
   const cleanSpec = String(specialization || '').trim().toUpperCase();
 
   let idx = facultyData.findIndex(
     (f) =>
       f.role === 'HOD' &&
       f.email.toLowerCase() === cleanEmail &&
-      (!cleanDept || f.department.toUpperCase() === cleanDept) &&
+      (!cleanDept || sameDepartmentSet(f.department, cleanDept)) &&
       (!cleanSpec || (f.specialization || 'ALL').toUpperCase() === cleanSpec)
   );
   if (idx < 0 && cleanEmail) {
@@ -2494,12 +2554,14 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
     });
   }
 
+  const mergedDept =
+    matchedRows.reduce((acc, r) => mergeDepartments(acc, r.department), '') || matchedRows[0].department;
   const mergedSpec = matchedRows.reduce((acc, r) => mergeSpecializations(acc, r.specialization), '') || 'ALL';
   const faculty: FacultyRecord = {
     ...matchedRows[0],
+    department: mergedDept,
     specialization: mergedSpec,
   };
-  const dept = faculty.department.toUpperCase();
 
   const filtered = submissionsData.filter((sub) => {
     const subDept = sub.departmentBranch.toUpperCase();
@@ -2518,7 +2580,7 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
 
       if (role === 'TEACHER') {
         if (sub.approvalStatus !== 'PENDING_TEACHER') return false;
-        const matchDept = scopeDept === 'ALL' || subDept === scopeDept;
+        const matchDept = matchesDepartmentScope(scopeDept, subDept);
         const matchSpec = matchesSpecializationScope(scopeSpec, subSpec);
         const matchSem = scopeSem === 'ALL' || !subSem || subSem === scopeSem || subSem.includes(scopeSem) || scopeSem.includes(subSem);
         const matchSec = scopeSec === 'ALL' || splitSpecializations(scopeSec).includes(subSec);
@@ -2526,7 +2588,7 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
         return matchDept && matchSpec && matchSem && matchSec && matchBatch;
       } else if (role === 'HOD') {
         if (sub.approvalStatus !== 'PENDING_HOD') return false;
-        const matchDept = scopeDept === 'ALL' || subDept === scopeDept;
+        const matchDept = matchesDepartmentScope(scopeDept, subDept);
         const matchSpec = matchesSpecializationScope(scopeSpec, subSpec);
         return matchDept && matchSpec;
       }
@@ -2536,10 +2598,12 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
 
   const assignedTeachers = facultyData.filter((f) => {
     if (f.role !== 'TEACHER') return false;
-    if (dept !== 'ALL' && f.department.toUpperCase() !== dept) return false;
-    if (mergedSpec === 'ALL') return true;
-    const tSpec = (f.specialization || 'ALL').toUpperCase();
-    return tSpec === 'ALL' || matchesSpecializationScope(mergedSpec, tSpec);
+    return matchedRows.some((scopeRow) => {
+      const matchDept = matchesDepartmentScope(scopeRow.department, f.department);
+      const tSpec = (f.specialization || 'ALL').toUpperCase();
+      const matchSpec = tSpec === 'ALL' || matchesSpecializationScope(scopeRow.specialization, tSpec);
+      return matchDept && matchSpec;
+    });
   });
 
   return res.json({
@@ -2593,9 +2657,18 @@ app.post('/api/faculty/action', async (req: Request, res: Response) => {
 app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
   const { hodEmail, teacherEmail, teacherName, department, specialization, semester, batch, section } = req.body;
 
-  const hod = facultyData.find((f) => f.email.toLowerCase() === String(hodEmail).toLowerCase() && f.role === 'HOD');
-  if (!hod) {
+  const hodRows = facultyData.filter((f) => f.email.toLowerCase() === String(hodEmail).toLowerCase() && f.role === 'HOD');
+  if (hodRows.length === 0) {
     return res.status(403).json({ success: false, message: 'Only authorized Department HOD can assign class teachers.' });
+  }
+
+  const defaultHodDept = splitDepartments(hodRows[0].department)[0] || hodRows[0].department;
+  const requestedDept = normalizeDepartmentList(department) || defaultHodDept;
+  if (!hodRows.some((h) => matchesDepartmentScope(h.department, requestedDept))) {
+    return res.status(403).json({
+      success: false,
+      message: `Unauthorized Department '${requestedDept}'. You can only assign Class Teachers within your authorized HOD department(s).`,
+    });
   }
 
   const cleanEmail = String(teacherEmail).toLowerCase().trim();
@@ -2603,7 +2676,7 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
     email: cleanEmail,
     name: String(teacherName).trim(),
     role: 'TEACHER',
-    department: department || hod.department,
+    department: requestedDept,
     specialization: specialization || 'ALL',
     semester: String(semester || 'VIII').trim().toUpperCase(),
     batch: batch || 'Batch A',
@@ -2632,7 +2705,7 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
 
   return res.json({
     success: true,
-    message: `Class Teacher ${newTeacher.name} assigned for Sem ${newTeacher.semester} Sec ${newTeacher.section} (${newTeacher.batch}).`,
+    message: `Class Teacher ${newTeacher.name} (${newTeacher.department}) assigned for Sem ${newTeacher.semester} Sec ${newTeacher.section} (${newTeacher.batch}).`,
     teacher: newTeacher,
   });
 });
@@ -2641,8 +2714,8 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
 app.post('/api/faculty/update-teacher', async (req: Request, res: Response) => {
   const { hodEmail, oldEmail, newEmail, name, department, specialization, semester, batch, section } = req.body;
 
-  const hod = facultyData.find((f) => f.email.toLowerCase() === String(hodEmail).toLowerCase() && f.role === 'HOD');
-  if (!hod) {
+  const hodRows = facultyData.filter((f) => f.email.toLowerCase() === String(hodEmail).toLowerCase() && f.role === 'HOD');
+  if (hodRows.length === 0) {
     return res.status(403).json({ success: false, message: 'Only authorized Department HOD can update class teachers.' });
   }
 
@@ -2654,11 +2727,19 @@ app.post('/api/faculty/update-teacher', async (req: Request, res: Response) => {
     return res.status(404).json({ success: false, message: 'Class Teacher record not found.' });
   }
 
+  const normalizedDept = department ? normalizeDepartmentList(department) : facultyData[idx].department;
+  if (normalizedDept && !hodRows.some((h) => matchesDepartmentScope(h.department, normalizedDept))) {
+    return res.status(403).json({
+      success: false,
+      message: `Unauthorized Department '${normalizedDept}'. You can only assign Class Teachers within your authorized HOD department(s).`,
+    });
+  }
+
   facultyData[idx] = {
     ...facultyData[idx],
     email: cleanNewEmail,
     name: name ? String(name).trim() : facultyData[idx].name,
-    department: department ? String(department).trim() : facultyData[idx].department,
+    department: normalizedDept || facultyData[idx].department,
     specialization: specialization ? String(specialization).trim() : facultyData[idx].specialization,
     semester: semester ? String(semester).trim().toUpperCase() : facultyData[idx].semester,
     batch: batch ? String(batch).trim() : facultyData[idx].batch,

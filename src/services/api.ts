@@ -26,6 +26,47 @@ const simulatedOtps: Record<string, { otp: string; expiresAt: number; portalType
 const DEFAULT_MASTER_SHEET_ID = '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ';
 const DEFAULT_DRIVE_FOLDER_ID = '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI';
 
+function splitDeptsClient(raw?: string): string[] {
+  return Array.from(
+    new Set(
+      String(raw || '')
+        .split(/[;,]+/)
+        .map((d) => d.trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeDeptsClient(raw?: string): string {
+  const list = splitDeptsClient(raw);
+  if (list.length === 0) return '';
+  if (list.includes('ALL')) return 'ALL';
+  return list.join(', ');
+}
+
+function sameDeptSetClient(a?: string, b?: string): boolean {
+  const la = splitDeptsClient(a).sort();
+  const lb = splitDeptsClient(b).sort();
+  if (la.length !== lb.length) return false;
+  return la.every((v, i) => v === lb[i]);
+}
+
+function mergeDeptsClient(existing?: string, added?: string): string {
+  const combined = Array.from(new Set([...splitDeptsClient(existing), ...splitDeptsClient(added)]));
+  if (combined.length === 0) return 'ALL';
+  if (combined.includes('ALL')) return 'ALL';
+  return combined.join(', ');
+}
+
+function mergeSpecsClient(existing?: string, added?: string): string {
+  const a = String(existing || '').split(/[;,]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+  const b = String(added || '').split(/[;,]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+  const combined = Array.from(new Set([...a, ...b]));
+  if (combined.length === 0) return 'ALL';
+  if (combined.includes('ALL')) return 'ALL';
+  return combined.join(', ');
+}
+
 function extractGoogleResourceId(input?: string): string {
   const clean = String(input || '').trim();
   if (!clean) return '';
@@ -369,10 +410,16 @@ export const api = {
           message: `Access Denied: ${cleanEmail} is not registered in the Faculty directory. Department HODs are appointed by COE and Class Teachers are appointed by HOD.`,
         };
       }
+      const mergedDept = matches.reduce((acc, r) => mergeDeptsClient(acc, r.department), '') || matches[0].department;
+      const mergedSpec = matches.reduce((acc, r) => mergeSpecsClient(acc, r.specialization), '') || 'ALL';
       return {
         success: true,
         message: `Faculty authentication successful (${matches[0].role}).`,
-        faculty: matches[0],
+        faculty: {
+          ...matches[0],
+          department: mergedDept,
+          specialization: mergedSpec,
+        },
       };
     }
 
@@ -1682,7 +1729,7 @@ export const api = {
     }
 
     const cleanEmail = payload.email.toLowerCase().trim();
-    const cleanDept = payload.department.trim().toUpperCase();
+    const cleanDept = normalizeDeptsClient(payload.department);
     const cleanSpecTokens = String(payload.specialization || 'ALL')
       .split(/[;,]+/)
       .map((s) => s.trim().toUpperCase())
@@ -1690,7 +1737,7 @@ export const api = {
     const cleanSpec = cleanSpecTokens.join(', ') || 'ALL';
     const faculty = storage.getFaculty();
     const sameHodIdx = faculty.findIndex(
-      (f) => f.role === 'HOD' && f.email.toLowerCase() === cleanEmail && f.department.toUpperCase() === cleanDept
+      (f) => f.role === 'HOD' && f.email.toLowerCase() === cleanEmail && sameDeptSetClient(f.department, cleanDept)
     );
     const sameSpecIdx =
       sameHodIdx >= 0
@@ -1698,7 +1745,7 @@ export const api = {
         : faculty.findIndex(
             (f) =>
               f.role === 'HOD' &&
-              f.department.toUpperCase() === cleanDept &&
+              sameDeptSetClient(f.department, cleanDept) &&
               (f.specialization || 'ALL').toUpperCase() === cleanSpec
           );
 
@@ -1765,17 +1812,17 @@ export const api = {
     }
 
     const cleanOldEmail = payload.oldEmail.toLowerCase().trim();
-    const cleanOldDept = (payload.oldDepartment || '').trim().toUpperCase();
+    const cleanOldDept = normalizeDeptsClient(payload.oldDepartment);
     const cleanOldSpec = (payload.oldSpecialization || '').trim().toUpperCase();
     const cleanNewEmail = (payload.newEmail || cleanOldEmail).toLowerCase().trim();
-    const cleanDept = (payload.department || '').trim().toUpperCase();
+    const cleanDept = normalizeDeptsClient(payload.department);
     const cleanName = (payload.name || '').trim();
     const faculty = storage.getFaculty();
     let idx = faculty.findIndex(
       (f) =>
         f.role === 'HOD' &&
         f.email.toLowerCase() === cleanOldEmail &&
-        (!cleanOldDept || f.department.toUpperCase() === cleanOldDept) &&
+        (!cleanOldDept || sameDeptSetClient(f.department, cleanOldDept)) &&
         (!cleanOldSpec || (f.specialization || 'ALL').toUpperCase() === cleanOldSpec)
     );
     if (idx < 0) {
@@ -1828,7 +1875,7 @@ export const api = {
   // COE Delete / Remove Department HOD
   async deleteHod(email: string, department?: string, specialization?: string): Promise<ApiResponse> {
     const cleanEmail = email.toLowerCase().trim();
-    const cleanDept = (department || '').trim().toUpperCase();
+    const cleanDept = normalizeDeptsClient(department);
     const cleanSpec = (specialization || '').trim().toUpperCase();
 
     if (canUseExpressApi()) {
@@ -1852,7 +1899,7 @@ export const api = {
         !(
           f.role === 'HOD' &&
           f.email.toLowerCase() === cleanEmail &&
-          (!cleanDept || f.department.toUpperCase() === cleanDept) &&
+          (!cleanDept || sameDeptSetClient(f.department, cleanDept)) &&
           (!cleanSpec || (f.specialization || 'ALL').toUpperCase() === cleanSpec)
         )
     );

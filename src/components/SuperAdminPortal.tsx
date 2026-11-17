@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldCheck,
   UserPlus,
@@ -12,7 +12,8 @@ import {
   LogOut as LogOutIcon,
   Lock,
   KeyRound,
-  BookOpen
+  BookOpen,
+  Edit3
 } from 'lucide-react';
 import { api } from '../services/api';
 import { storage } from '../services/store';
@@ -59,8 +60,22 @@ export const SuperAdminPortal: React.FC = () => {
   const [isManualOpen, setIsManualOpen] = useState<boolean>(false);
 
   // ACOE Management State
-  const [acoeForm, setAcoeForm] = useState({ email: '', name: '', otpEnabled: true });
+  const [acoeForm, setAcoeForm] = useState({
+    email: '',
+    name: '',
+    streamScope: 'ALL' as 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING',
+    role: 'ACOE',
+    password: '',
+    otpEnabled: true,
+  });
+  const [editingAcoeEmail, setEditingAcoeEmail] = useState<string | null>(null);
   const [isAddingAcoe, setIsAddingAcoe] = useState(false);
+  const acoeFormRef = useRef<HTMLDivElement | null>(null);
+
+  // Script URL inline edit state (Tab 2)
+  const [isEditingScriptUrl, setIsEditingScriptUrl] = useState(false);
+  const [scriptUrlDraft, setScriptUrlDraft] = useState(() => storage.getConfig().scriptUrl);
+
   const [stats, setStats] = useState<CoeOverviewStats>({
     pendingTeacher: 0,
     pendingHod: 0,
@@ -134,73 +149,131 @@ export const SuperAdminPortal: React.FC = () => {
     setIsAuthenticated(false);
   };
 
+  const resetAcoeForm = () => {
+    setEditingAcoeEmail(null);
+    setAcoeForm({
+      email: '',
+      name: '',
+      streamScope: 'ALL',
+      role: 'ACOE',
+      password: '',
+      otpEnabled: true,
+    });
+  };
+
   const handleAddAcoeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsAddingAcoe(true);
     setNotification(null);
     try {
-        let targetEmail = acoeForm.email.toLowerCase().trim();
-        if (!targetEmail) {
-            setNotification({ type: 'error', message: 'Please enter ACOE email.' });
-            setIsAddingAcoe(false);
-            return;
-        }
-        if (!targetEmail.includes('@')) {
-            targetEmail = targetEmail + '@hindustanuniv.ac.in';
-        }
-        if (!targetEmail.endsWith('@hindustanuniv.ac.in')) {
-            setNotification({ type: 'error', message: 'ACOE email must end in @hindustanuniv.ac.in' });
-            setIsAddingAcoe(false);
-            return;
-        }
-
-        const res = await api.addAcoeUser({ email: targetEmail, name: acoeForm.name, otpEnabled: acoeForm.otpEnabled });
-        if (res.success) {
-            setNotification({ type: 'success', message: 'ACOE User added successfully.' });
-            setAcoeForm({ email: '', name: '', otpEnabled: true });
-            loadData();
-        } else {
-            setNotification({ type: 'error', message: res.message || 'Failed to add ACOE user.' });
-        }
-    } catch (e: any) {
-        setNotification({ type: 'error', message: 'Error adding ACOE user.' });
-    } finally {
+      let targetEmail = acoeForm.email.toLowerCase().trim();
+      if (!targetEmail) {
+        setNotification({ type: 'error', message: 'Please enter an official user email.' });
         setIsAddingAcoe(false);
-    }
-  };
+        return;
+      }
+      if (!targetEmail.includes('@')) {
+        targetEmail = targetEmail + '@hindustanuniv.ac.in';
+      }
+      if (!targetEmail.endsWith('@hindustanuniv.ac.in')) {
+        setNotification({ type: 'error', message: 'Official user email must end in @hindustanuniv.ac.in' });
+        setIsAddingAcoe(false);
+        return;
+      }
+      if (!acoeForm.name.trim()) {
+        setNotification({ type: 'error', message: 'Full Name / Title is required.' });
+        setIsAddingAcoe(false);
+        return;
+      }
+      if (acoeForm.password.trim() && acoeForm.password.trim().length < 6) {
+        setNotification({ type: 'error', message: 'Password must be at least 6 characters long.' });
+        setIsAddingAcoe(false);
+        return;
+      }
 
-  const handleToggleOtp = async (email: string, currentStatus: boolean) => {
-    setNotification(null);
-    try {
-        const res = await api.toggleAcoeOtp(email, !currentStatus);
+      if (editingAcoeEmail) {
+        const res = await api.updateAcoeUser({
+          oldEmail: editingAcoeEmail,
+          newEmail: targetEmail,
+          name: acoeForm.name.trim(),
+          streamScope: acoeForm.streamScope,
+          role: acoeForm.role,
+          ...(acoeForm.password.trim() ? { password: acoeForm.password.trim() } : {}),
+          otpEnabled: acoeForm.otpEnabled,
+        });
         if (res.success) {
-            setNotification({ type: 'success', message: 'OTP status updated.' });
-            loadData();
+          setNotification({
+            type: 'success',
+            message: res.message || `User ${acoeForm.name.trim()} (${targetEmail}) updated and saved.`,
+          });
+          resetAcoeForm();
+          await loadData();
         } else {
-            setNotification({ type: 'error', message: res.message || 'Failed to update OTP status.' });
+          setNotification({ type: 'error', message: res.message || 'Failed to update user details.' });
         }
-    } catch (e: any) {
-        setNotification({ type: 'error', message: 'Error updating OTP status.' });
+      } else {
+        const res = await api.addAcoeUser({
+          email: targetEmail,
+          name: acoeForm.name.trim(),
+          streamScope: acoeForm.streamScope,
+          role: acoeForm.role,
+          ...(acoeForm.password.trim() ? { password: acoeForm.password.trim() } : {}),
+          otpEnabled: acoeForm.otpEnabled,
+        });
+        if (res.success) {
+          setNotification({
+            type: 'success',
+            message: res.message || 'ACOE User added successfully.',
+          });
+          resetAcoeForm();
+          await loadData();
+        } else {
+          setNotification({ type: 'error', message: res.message || 'Failed to add ACOE user.' });
+        }
+      }
+    } catch {
+      setNotification({
+        type: 'error',
+        message: editingAcoeEmail ? 'Error saving user details.' : 'Error adding ACOE user.',
+      });
+    } finally {
+      setIsAddingAcoe(false);
     }
   };
 
-  const handleEditAcoeEmail = async (user: CoeUserAccount) => {
-      console.log('Edit email for', user.email);
-      setNotification({ type: 'error', message: 'Feature not yet implemented.' });
-  }
+  const handleEditAcoeUser = (user: CoeUserAccount) => {
+    setNotification(null);
+    const normalizedScope =
+      user.streamScope === 'ENGINEERING' || user.streamScope === 'NON_ENGINEERING'
+        ? user.streamScope
+        : 'ALL';
+    setEditingAcoeEmail(user.email);
+    setAcoeForm({
+      email: user.email || '',
+      name: user.name || '',
+      streamScope: normalizedScope,
+      role: user.role === 'COE' ? 'COE' : 'ACOE',
+      password: '',
+      otpEnabled: user.otpEnabled !== false,
+    });
+    acoeFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
 
   const handleDeleteAcoe = async (email: string) => {
     setNotification(null);
     try {
-        const res = await api.deleteAcoeUser(email);
-        if (res.success) {
-            setNotification({ type: 'success', message: 'ACOE user removed.' });
-            loadData();
-        } else {
-            setNotification({ type: 'error', message: res.message || 'Failed to remove ACOE user.' });
+      const res = await api.deleteAcoeUser(email);
+      if (res.success) {
+        if (editingAcoeEmail && editingAcoeEmail.toLowerCase() === email.toLowerCase()) {
+          resetAcoeForm();
         }
-    } catch (e: any) {
-        setNotification({ type: 'error', message: 'Error removing ACOE user.' });
+        setNotification({ type: 'success', message: 'ACOE user removed.' });
+        loadData();
+      } else {
+        setNotification({ type: 'error', message: res.message || 'Failed to remove ACOE user.' });
+      }
+    } catch {
+      setNotification({ type: 'error', message: 'Error removing ACOE user.' });
     }
   };
 
@@ -427,19 +500,41 @@ export const SuperAdminPortal: React.FC = () => {
       {activeTab === 'acoe_management' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Appoint ACOE Form */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-                  <UserPlus className="w-5 h-5" />
+            {/* Appoint / Edit ACOE Form */}
+            <div
+              ref={acoeFormRef}
+              className={`bg-white p-6 rounded-3xl border shadow-xs space-y-4 transition-all ${
+                editingAcoeEmail ? 'border-amber-400 ring-2 ring-amber-200/70' : 'border-slate-200'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold shrink-0">
+                    {editingAcoeEmail ? <Edit3 className="w-4 h-4" /> : <UserPlus className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900">
+                      {editingAcoeEmail ? 'Edit ACOE User Details' : 'Appoint ACOE Administrator'}
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      {editingAcoeEmail
+                        ? `Updating account for ${editingAcoeEmail}`
+                        : 'Authorize users with access to administrative tools'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">Appoint ACOE Administrator</h2>
-                  <p className="text-xs text-slate-500">Authorize users with access to administrative tools</p>
-                </div>
+                {editingAcoeEmail && (
+                  <button
+                    type="button"
+                    onClick={resetAcoeForm}
+                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold cursor-pointer shrink-0"
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
 
-              <form onSubmit={handleAddAcoeSubmit} className="space-y-4">
+              <form onSubmit={handleAddAcoeSubmit} className="space-y-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Official ACOE Email *
@@ -471,25 +566,87 @@ export const SuperAdminPortal: React.FC = () => {
                   />
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Account Role
+                    </label>
+                    <select
+                      value={acoeForm.role}
+                      onChange={(e) => setAcoeForm({ ...acoeForm, role: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-semibold"
+                    >
+                      <option value="ACOE">ACOE (Assistant COE)</option>
+                      <option value="COE">COE (Officer)</option>
+                    </select>
+                  </div>
 
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Stream Scope
+                    </label>
+                    <select
+                      value={acoeForm.streamScope}
+                      onChange={(e) =>
+                        setAcoeForm({
+                          ...acoeForm,
+                          streamScope: e.target.value as 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING',
+                        })
+                      }
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-semibold"
+                    >
+                      <option value="ALL">ALL Streams</option>
+                      <option value="ENGINEERING">Engineering Only</option>
+                      <option value="NON_ENGINEERING">Non-Engineering Only</option>
+                    </select>
+                  </div>
+                </div>
 
-                <button
-                  type="submit"
-                  disabled={isAddingAcoe}
-                  className="w-full py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
-                >
-                  {isAddingAcoe ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Authorizing User...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="w-4 h-4" />
-                      Appoint ACOE User
-                    </>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {editingAcoeEmail ? 'New Login Password (Optional)' : 'Initial Login Password (Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={acoeForm.password}
+                    onChange={(e) => setAcoeForm({ ...acoeForm, password: e.target.value })}
+                    placeholder={
+                      editingAcoeEmail
+                        ? 'Leave blank to keep current password'
+                        : 'Defaults to Acoe@123 if blank'
+                    }
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  {editingAcoeEmail && (
+                    <button
+                      type="button"
+                      onClick={resetAcoeForm}
+                      className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
                   )}
-                </button>
+                  <button
+                    type="submit"
+                    disabled={isAddingAcoe}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                  >
+                    {isAddingAcoe ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        {editingAcoeEmail ? 'Saving Changes...' : 'Authorizing User...'}
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        {editingAcoeEmail ? 'Save User Changes' : 'Appoint ACOE User'}
+                      </>
+                    )}
+                  </button>
+                </div>
               </form>
             </div>
 
@@ -498,7 +655,7 @@ export const SuperAdminPortal: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-base font-bold text-slate-900">Authorized COE Users Directory</h2>
-                  <p className="text-xs text-slate-500">Manage ACOE emails and toggle Email OTP status anytime</p>
+                  <p className="text-xs text-slate-500">Manage ACOE user details, roles, stream scopes, and access</p>
                 </div>
                 <button
                   onClick={loadData}
@@ -514,46 +671,64 @@ export const SuperAdminPortal: React.FC = () => {
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
                       <th className="p-3">User Name / Title</th>
                       <th className="p-3">Login Key (Email)</th>
-                      <th className="p-3 text-right">Email Controls</th>
+                      <th className="p-3">Scope / Role</th>
+                      <th className="p-3 text-right">User Controls</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {coeUsersList.filter(user => user.role !== 'SUPER_ADMIN').map((user, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/80">
-                        <td className="p-3 font-semibold text-slate-900">
-                          {user.name}
-                        </td>
-                        <td className="p-3 font-mono text-purple-700 font-medium">
-                          {user.username ? (
-                            <span className="bg-purple-50 text-purple-800 px-1.5 py-0.5 rounded font-bold border border-purple-200">
-                              Username: {user.username}
+                    {coeUsersList.filter(user => user.role !== 'SUPER_ADMIN').map((user, idx) => {
+                      const isEditingThis = editingAcoeEmail?.toLowerCase() === user.email.toLowerCase();
+                      return (
+                        <tr
+                          key={user.email || idx}
+                          className={`transition-colors ${
+                            isEditingThis ? 'bg-amber-50/70' : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="p-3 font-semibold text-slate-900">
+                            {user.name}
+                          </td>
+                          <td className="p-3 font-mono text-purple-700 font-medium">
+                            {user.username && !user.email ? (
+                              <span className="bg-purple-50 text-purple-800 px-1.5 py-0.5 rounded font-bold border border-purple-200">
+                                Username: {user.username}
+                              </span>
+                            ) : (
+                              user.email
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold text-[10px] border border-slate-200">
+                              {user.role || 'ACOE'} • {user.streamScope || 'ALL'}
                             </span>
-                          ) : (
-                            user.email
-                          )}
-                        </td>
-                        <td className="p-3 text-right space-x-1.5">
-                          {user.role !== 'SUPER_ADMIN' && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleEditAcoeEmail(user)}
-                                className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-all cursor-pointer"
-                              >
-                                Edit Email
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteAcoe(user.email)}
-                                className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-red-50 text-red-700 hover:bg-red-100 transition-all cursor-pointer"
-                              >
-                                Remove
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
+                            {user.role !== 'SUPER_ADMIN' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditAcoeUser(user)}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer ${
+                                    isEditingThis
+                                      ? 'bg-amber-600 text-white'
+                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  {isEditingThis ? 'Editing...' : 'Edit User'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteAcoe(user.email)}
+                                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-red-50 text-red-700 hover:bg-red-100 transition-all cursor-pointer"
+                                >
+                                  Remove
+                                </button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -592,30 +767,65 @@ export const SuperAdminPortal: React.FC = () => {
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
               <h3 className="text-sm font-bold text-slate-900">System Configuration</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="block text-xs font-semibold text-slate-700 mb-1">Active Google Apps Script Web App URL</label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                         <input
                             type="text"
-                            value={storage.getConfig().scriptUrl}
-                            readOnly
-                            className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono"
+                            value={isEditingScriptUrl ? scriptUrlDraft : storage.getConfig().scriptUrl}
+                            readOnly={!isEditingScriptUrl}
+                            onChange={(e) => setScriptUrlDraft(e.target.value)}
+                            className={`flex-1 px-3 py-2 border rounded-xl text-xs font-mono ${
+                              isEditingScriptUrl
+                                ? 'bg-white border-amber-400 ring-2 ring-amber-200 focus:outline-hidden'
+                                : 'bg-slate-100 border-slate-200 text-slate-700'
+                            }`}
                         />
-                        <button
-                            onClick={async () => {
-                                const newUrl = prompt('Enter new Google Apps Script Web App URL:', storage.getConfig().scriptUrl);
-                                if (newUrl && newUrl.trim()) {
-                                    const cfg = storage.getConfig();
-                                    cfg.scriptUrl = newUrl.trim();
-                                    storage.saveConfig(cfg);
-                                    setNotification({ type: 'success', message: 'Script URL updated successfully.' });
-                                    loadData();
+                        {isEditingScriptUrl ? (
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const trimmed = scriptUrlDraft.trim();
+                                if (!trimmed) {
+                                  setNotification({ type: 'error', message: 'Web App URL cannot be empty.' });
+                                  return;
                                 }
+                                const cfg = storage.getConfig();
+                                cfg.scriptUrl = trimmed;
+                                storage.saveConfig(cfg);
+                                await api.updateCoeConfig({ scriptUrl: trimmed });
+                                setIsEditingScriptUrl(false);
+                                setNotification({ type: 'success', message: 'Google Apps Script Web App URL updated and saved.' });
+                                loadData();
+                              }}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
+                            >
+                              Save URL
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setScriptUrlDraft(storage.getConfig().scriptUrl);
+                                setIsEditingScriptUrl(false);
+                              }}
+                              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setScriptUrlDraft(storage.getConfig().scriptUrl);
+                              setIsEditingScriptUrl(true);
                             }}
-                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
-                        >
-                            Update URL
-                        </button>
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold cursor-pointer shrink-0"
+                          >
+                            Edit Web App URL
+                          </button>
+                        )}
                     </div>
                     <p className="text-[10px] text-slate-400 mt-1">Used for OTP dispatch fallback and sheet data sync.</p>
                   </div>

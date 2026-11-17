@@ -15,6 +15,8 @@ export interface ApiResponse<T = any> {
   coeUser?: any;
   users?: any[];
   assignedTeachers?: FacultyRecord[];
+  departments?: string[];
+  specializationsByDept?: Record<string, string[]>;
 }
 
 
@@ -23,6 +25,67 @@ const simulatedOtps: Record<string, { otp: string; expiresAt: number; portalType
 
 const DEFAULT_MASTER_SHEET_ID = '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ';
 const DEFAULT_DRIVE_FOLDER_ID = '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI';
+
+function extractGoogleResourceId(input?: string): string {
+  const clean = String(input || '').trim();
+  if (!clean) return '';
+  const folderMatch = clean.match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
+  if (folderMatch && folderMatch[1]) return folderMatch[1];
+  const docMatch = clean.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (docMatch && docMatch[1]) return docMatch[1];
+  const idParamMatch = clean.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if (idParamMatch && idParamMatch[1]) return idParamMatch[1];
+  const bareMatch = clean.match(/^[a-zA-Z0-9_-]{15,}$/);
+  if (bareMatch) return clean;
+  const fallbackMatch = clean.match(/[-\w]{25,}/);
+  return fallbackMatch ? fallbackMatch[0] : '';
+}
+
+function normalizeSpreadsheetUrl(urlOrId: string, extractedId: string): string {
+  const clean = urlOrId.trim();
+  if (clean.startsWith('http://') || clean.startsWith('https://')) return clean;
+  return extractedId ? `https://docs.google.com/spreadsheets/d/${extractedId}/edit` : clean;
+}
+
+function normalizeDriveFolderUrl(urlOrId: string, extractedId: string): string {
+  const clean = urlOrId.trim();
+  if (clean.startsWith('http://') || clean.startsWith('https://')) return clean;
+  return extractedId ? `https://drive.google.com/drive/folders/${extractedId}` : clean;
+}
+
+function syncStorageFromCoeSettings(settings: Partial<CoeSettings>, markCustom: boolean) {
+  const cfg = storage.getConfig();
+  if (settings.spreadsheetUrl) {
+    const sid = settings.spreadsheetId || extractGoogleResourceId(settings.spreadsheetUrl) || cfg.spreadsheetId;
+    cfg.spreadsheetId = sid;
+    cfg.spreadsheetUrl = normalizeSpreadsheetUrl(settings.spreadsheetUrl, sid);
+  } else if (settings.spreadsheetId) {
+    cfg.spreadsheetId = settings.spreadsheetId;
+    cfg.spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${settings.spreadsheetId}/edit`;
+  }
+  if (settings.driveFolderUrl) {
+    const fid = settings.driveFolderId || extractGoogleResourceId(settings.driveFolderUrl) || cfg.parentFolderId;
+    cfg.parentFolderId = fid;
+    cfg.driveFolderUrl = normalizeDriveFolderUrl(settings.driveFolderUrl, fid);
+  } else if (settings.driveFolderId) {
+    cfg.parentFolderId = settings.driveFolderId;
+    cfg.driveFolderUrl = `https://drive.google.com/drive/folders/${settings.driveFolderId}`;
+  }
+  if (typeof settings.scriptUrl === 'string' && settings.scriptUrl.trim()) {
+    cfg.scriptUrl = settings.scriptUrl.trim();
+  }
+  if (settings.academicYear) {
+    cfg.academicYear = settings.academicYear;
+  }
+  if (settings.convocationBatch) {
+    cfg.convocationBatch = settings.convocationBatch;
+  }
+  if (markCustom || settings.isCustomized) {
+    cfg.isCustomConfig = true;
+    cfg.configUpdatedAt = Date.now();
+  }
+  storage.saveConfig(cfg);
+}
 
 // Resolves API endpoint URL: uses VITE_API_BASE_URL (or configured Render URL) when UI is hosted on GitHub Pages,
 // or relative '/api/...' when UI and backend are hosted together on Render.
@@ -320,21 +383,36 @@ export const api = {
   },
 
   // 3. Get Student Data for Verification
-  async getStudentData(registerNumber: string): Promise<ApiResponse> {
+  async getStudentData(registerNumber: string, studentEmail?: string): Promise<ApiResponse> {
     const cleanRegNo = registerNumber.trim().toLowerCase();
 
     if (!cleanRegNo) {
       return { success: false, message: 'Please enter a valid Register Number.' };
     }
 
+    const cleanStudentEmail = (studentEmail || '').trim().toLowerCase();
+    if (
+      cleanStudentEmail &&
+      (cleanStudentEmail.endsWith('@student.hindustanuniv.ac.in') || cleanStudentEmail.endsWith('@hindustanuniv.ac.in'))
+    ) {
+      const expectedReg = cleanStudentEmail.split('@')[0].trim().toLowerCase();
+      if (expectedReg && cleanRegNo !== expectedReg) {
+        return {
+          success: false,
+          message: `Access Denied: You are logged in as ${cleanStudentEmail}. You can only view details for your own Register Number (${expectedReg.toUpperCase()}).`,
+        };
+      }
+    }
+
     // Try Express backend first when available
     if (canUseExpressApi()) {
       try {
-        const response = await fetch(apiUrl(`/api/student/lookup/${encodeURIComponent(cleanRegNo)}`));
+        const qs = cleanStudentEmail ? `?studentEmail=${encodeURIComponent(cleanStudentEmail)}` : '';
+        const response = await fetch(apiUrl(`/api/student/lookup/${encodeURIComponent(cleanRegNo)}${qs}`));
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
           const res = await response.json();
-          if (res.success || response.status === 404) return res;
+          if (res.success || response.status === 404 || response.status === 403) return res;
         }
       } catch {
         // Fallback
@@ -347,7 +425,12 @@ export const api = {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'getStudentData', registerNumber: cleanRegNo }),
+          body: JSON.stringify({
+            action: 'getStudentData',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
+            registerNumber: cleanRegNo,
+          }),
         });
         const res = await response.json();
         return res;
@@ -415,6 +498,8 @@ export const api = {
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'submitStudentApplication',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
             ...payload,
           }),
         });
@@ -464,16 +549,31 @@ export const api = {
   },
 
   // 5. Check Submission Status
-  async checkStatus(query: string): Promise<ApiResponse> {
+  async checkStatus(query: string, studentEmail?: string): Promise<ApiResponse> {
     const cleanQuery = query.toLowerCase().trim();
 
     if (!cleanQuery) {
       return { success: false, message: 'Please enter Register Number or Email.' };
     }
 
+    const cleanStudentEmail = (studentEmail || '').trim().toLowerCase();
+    if (
+      cleanStudentEmail &&
+      (cleanStudentEmail.endsWith('@student.hindustanuniv.ac.in') || cleanStudentEmail.endsWith('@hindustanuniv.ac.in'))
+    ) {
+      const expectedReg = cleanStudentEmail.split('@')[0].trim().toLowerCase();
+      if (expectedReg && cleanQuery !== expectedReg && cleanQuery !== cleanStudentEmail) {
+        return {
+          success: false,
+          message: `Access Denied: You are logged in as ${cleanStudentEmail}. You can only track clearance status for your own Register Number (${expectedReg.toUpperCase()}).`,
+        };
+      }
+    }
+
     if (canUseExpressApi()) {
       try {
-        const response = await fetch(apiUrl(`/api/student/status/${encodeURIComponent(cleanQuery)}`));
+        const qs = cleanStudentEmail ? `?studentEmail=${encodeURIComponent(cleanStudentEmail)}` : '';
+        const response = await fetch(apiUrl(`/api/student/status/${encodeURIComponent(cleanQuery)}${qs}`));
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
           const res = await response.json();
@@ -497,7 +597,12 @@ export const api = {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'checkSubmissionStatus', query: cleanQuery }),
+          body: JSON.stringify({
+            action: 'checkSubmissionStatus',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
+            query: cleanQuery,
+          }),
         });
         const res = await response.json();
         if (res.success && res.data) {
@@ -576,7 +681,12 @@ export const api = {
         const response = await fetch(config.scriptUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'getPendingApplications', email: cleanEmail }),
+          body: JSON.stringify({
+            action: 'getPendingApplications',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
+            email: cleanEmail,
+          }),
         });
         const res = await response.json();
         if (res.success && Array.isArray(res.data)) return res;
@@ -623,6 +733,8 @@ export const api = {
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'processFacultyAction',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
             ...payload,
           }),
         });
@@ -674,6 +786,8 @@ export const api = {
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'addClassTeacher',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
             ...payload,
           }),
         });
@@ -781,7 +895,58 @@ export const api = {
         const response = await fetch(apiUrl(url));
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
-          return await response.json();
+          const data: ApiResponse = await response.json();
+          if (data.success && data.settings) {
+            const localCfg = storage.getConfig();
+            if (data.settings.isCustomized) {
+              syncStorageFromCoeSettings(data.settings, true);
+            } else if (
+              localCfg.isCustomConfig &&
+              (localCfg.spreadsheetId !== DEFAULT_MASTER_SHEET_ID ||
+                localCfg.parentFolderId !== DEFAULT_DRIVE_FOLDER_ID ||
+                (localCfg.spreadsheetUrl && localCfg.spreadsheetUrl !== data.settings.spreadsheetUrl) ||
+                (localCfg.driveFolderUrl && localCfg.driveFolderUrl !== data.settings.driveFolderUrl))
+            ) {
+              // Server booted with uncustomized defaults (e.g. ephemeral container restart); restore saved user links
+              const restoredDriveUrl =
+                localCfg.driveFolderUrl || `https://drive.google.com/drive/folders/${localCfg.parentFolderId}`;
+              const restoredSheetUrl =
+                localCfg.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${localCfg.spreadsheetId}/edit`;
+              const restoredYear = localCfg.academicYear || data.settings.academicYear;
+              const restoredBatch = localCfg.convocationBatch || data.settings.convocationBatch;
+              const restorePayload = {
+                driveFolderUrl: restoredDriveUrl,
+                spreadsheetUrl: restoredSheetUrl,
+                academicYear: restoredYear,
+                convocationBatch: restoredBatch,
+              };
+              try {
+                const restoreRes = await fetch(apiUrl('/api/coe/config'), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                  body: JSON.stringify(restorePayload),
+                });
+                if (restoreRes.ok && (restoreRes.headers.get('content-type') || '').includes('application/json')) {
+                  const restored = await restoreRes.json();
+                  if (restored?.settings) {
+                    data.settings = restored.settings;
+                  }
+                }
+              } catch {
+                data.settings = {
+                  ...data.settings,
+                  driveFolderUrl: restoredDriveUrl,
+                  spreadsheetUrl: restoredSheetUrl,
+                  academicYear: restoredYear,
+                  convocationBatch: restoredBatch,
+                  spreadsheetId: localCfg.spreadsheetId,
+                  driveFolderId: localCfg.parentFolderId,
+                  isCustomized: true,
+                };
+              }
+            }
+          }
+          return data;
         }
       } catch {
         // Fallback
@@ -792,18 +957,36 @@ export const api = {
     const subs = storage.getSubmissions();
     const students = storage.getStudents();
     const faculty = storage.getFaculty();
-    const sheetId = storage.getConfig().spreadsheetId || DEFAULT_MASTER_SHEET_ID;
-    const folderId = storage.getConfig().parentFolderId || DEFAULT_DRIVE_FOLDER_ID;
+    const cfg = storage.getConfig();
+    const sheetId = cfg.spreadsheetId || DEFAULT_MASTER_SHEET_ID;
+    const folderId = cfg.parentFolderId || DEFAULT_DRIVE_FOLDER_ID;
+
+    const deptSet = new Set<string>();
+    const specMap: Record<string, Set<string>> = {};
+    for (const s of students) {
+      const b = String(s.branch || '').trim().toUpperCase();
+      if (!b) continue;
+      deptSet.add(b);
+      if (!specMap[b]) specMap[b] = new Set<string>();
+      const sp = String(s.specialization || '').trim().toUpperCase();
+      if (sp && sp !== 'GENERAL' && sp !== 'ALL') specMap[b].add(sp);
+    }
+    const specializationsByDept: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(specMap)) {
+      specializationsByDept[k] = Array.from(v).sort();
+    }
 
     return {
       success: true,
       settings: {
-        spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${sheetId}/edit`,
+        spreadsheetUrl: cfg.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sheetId}/edit`,
         spreadsheetId: sheetId,
-        driveFolderUrl: `https://drive.google.com/drive/folders/${folderId}`,
+        driveFolderUrl: cfg.driveFolderUrl || `https://drive.google.com/drive/folders/${folderId}`,
         driveFolderId: folderId,
-        academicYear: '2024-2025',
-        convocationBatch: '34th Convocation Ceremony',
+        scriptUrl: cfg.scriptUrl,
+        academicYear: cfg.academicYear || '2024-2025',
+        convocationBatch: cfg.convocationBatch || '34th Convocation Ceremony',
+        isCustomized: Boolean(cfg.isCustomConfig),
       },
       stats: {
         totalStudents: students.length,
@@ -816,6 +999,8 @@ export const api = {
         totalTeachers: faculty.filter((f) => f.role === 'TEACHER').length,
       },
       hods: faculty.filter((f) => f.role === 'HOD'),
+      departments: Array.from(deptSet).sort(),
+      specializationsByDept,
     };
   },
 
@@ -992,6 +1177,8 @@ export const api = {
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'addAcoe',
+            parentFolderId: config.parentFolderId,
+            spreadsheetId: config.spreadsheetId,
             email: cleanEmail,
             name: cleanName,
             role: 'ACOE',
@@ -1044,20 +1231,47 @@ export const api = {
     };
   },
 
-  // Update ACOE Email or Name
-  async updateAcoeUser(payload: { oldEmail: string; newEmail?: string; name?: string; otpEnabled?: boolean }): Promise<ApiResponse> {
+  // Update ACOE User Details
+  async updateAcoeUser(payload: {
+    oldEmail: string;
+    newEmail?: string;
+    name?: string;
+    streamScope?: string;
+    role?: string;
+    password?: string;
+    otpEnabled?: boolean;
+  }): Promise<ApiResponse> {
     const cleanOldEmail = String(payload.oldEmail || '').toLowerCase().trim();
     const cleanNewEmail = payload.newEmail ? String(payload.newEmail).toLowerCase().trim() : cleanOldEmail;
     const cleanName = payload.name ? String(payload.name).trim() : undefined;
+    const cleanScope = payload.streamScope ? String(payload.streamScope).toUpperCase().trim() : undefined;
+    const cleanRole = payload.role ? String(payload.role).toUpperCase().trim() : undefined;
 
     const faculty = storage.getFaculty();
-    const idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanOldEmail);
+    const idx = faculty.findIndex(
+      (f) => f.email.toLowerCase() === cleanOldEmail && String(f.role).toUpperCase().includes('COE')
+    );
     if (idx >= 0) {
       faculty[idx].email = cleanNewEmail;
       if (cleanName) faculty[idx].name = cleanName;
+      if (cleanScope) faculty[idx].department = cleanScope;
+      if (cleanRole) (faculty[idx] as any).role = cleanRole;
       if (typeof payload.otpEnabled === 'boolean') {
         (faculty[idx] as any).otpEnabled = payload.otpEnabled;
       }
+      storage.saveFaculty(faculty);
+    } else if (cleanNewEmail && cleanName) {
+      faculty.push({
+        email: cleanNewEmail,
+        name: cleanName,
+        role: (cleanRole || 'ACOE') as any,
+        department: cleanScope || 'ALL',
+        specialization: 'ALL',
+        semester: 'ALL',
+        batch: 'ALL',
+        section: 'ALL',
+        ...(typeof payload.otpEnabled === 'boolean' ? { otpEnabled: payload.otpEnabled } : {}),
+      } as any);
       storage.saveFaculty(faculty);
     }
 
@@ -1069,16 +1283,40 @@ export const api = {
           body: JSON.stringify(payload),
         });
         const contentType = response.headers.get('content-type') || '';
-        if (response.ok && contentType.includes('application/json')) {
+        if (response.status !== 405 && contentType.includes('application/json')) {
           return await response.json();
         }
       } catch {
         // Fallback
       }
     }
+
+    const config = storage.getConfig();
+    if (config.scriptUrl && config.scriptUrl.includes('script.google.com')) {
+      try {
+        const response = await fetch(config.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'updateAcoe',
+            oldEmail: cleanOldEmail,
+            newEmail: cleanNewEmail,
+            name: cleanName,
+            role: cleanRole || 'ACOE',
+            department: cleanScope || 'ALL',
+            streamScope: cleanScope || 'ALL',
+          }),
+        });
+        const res = await response.json();
+        return res;
+      } catch {
+        // Fallback
+      }
+    }
+
     return {
       success: true,
-      message: `ACOE details updated successfully.`,
+      message: `ACOE user details updated successfully.`,
     };
   },
 
@@ -1135,39 +1373,101 @@ export const api = {
 
   // Update COE Drive & Spreadsheet Config
   async updateCoeConfig(payload: Partial<CoeSettings>): Promise<ApiResponse> {
+    const hasDriveOrSheetUpdate = Boolean(
+      (payload.driveFolderUrl && payload.driveFolderUrl.trim()) ||
+        (payload.spreadsheetUrl && payload.spreadsheetUrl.trim())
+    );
+    const normalizedPayload: Partial<CoeSettings> = { ...payload };
+
+    const cfg = storage.getConfig();
+    if (payload.driveFolderUrl && payload.driveFolderUrl.trim()) {
+      const folderId = extractGoogleResourceId(payload.driveFolderUrl);
+      if (folderId) {
+        cfg.parentFolderId = folderId;
+        normalizedPayload.driveFolderId = folderId;
+      }
+      const normalizedDriveUrl = normalizeDriveFolderUrl(payload.driveFolderUrl, folderId || cfg.parentFolderId);
+      cfg.driveFolderUrl = normalizedDriveUrl;
+      normalizedPayload.driveFolderUrl = normalizedDriveUrl;
+    }
+    if (payload.spreadsheetUrl && payload.spreadsheetUrl.trim()) {
+      const sheetId = extractGoogleResourceId(payload.spreadsheetUrl);
+      if (sheetId) {
+        cfg.spreadsheetId = sheetId;
+        normalizedPayload.spreadsheetId = sheetId;
+      }
+      const normalizedSheetUrl = normalizeSpreadsheetUrl(payload.spreadsheetUrl, sheetId || cfg.spreadsheetId);
+      cfg.spreadsheetUrl = normalizedSheetUrl;
+      normalizedPayload.spreadsheetUrl = normalizedSheetUrl;
+    }
+    if (typeof payload.scriptUrl === 'string' && payload.scriptUrl.trim()) {
+      cfg.scriptUrl = payload.scriptUrl.trim();
+    }
+    if (payload.academicYear && payload.academicYear.trim()) {
+      cfg.academicYear = payload.academicYear.trim();
+    }
+    if (payload.convocationBatch && payload.convocationBatch.trim()) {
+      cfg.convocationBatch = payload.convocationBatch.trim();
+    }
+    if (hasDriveOrSheetUpdate) {
+      cfg.isCustomConfig = true;
+      cfg.configUpdatedAt = Date.now();
+    }
+    storage.saveConfig(cfg);
+
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/config'), {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(normalizedPayload),
         });
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
-          return await response.json();
+          const data: ApiResponse = await response.json();
+          if (data.success && data.settings) {
+            syncStorageFromCoeSettings(data.settings, hasDriveOrSheetUpdate);
+          }
+          return data;
         }
       } catch {
         // Fallback
       }
     }
 
-    const cfg = storage.getConfig();
-    if (payload.driveFolderUrl) {
-      const match = payload.driveFolderUrl.match(/[-\w]{25,}/);
-      if (match) cfg.parentFolderId = match[0];
+    if (cfg.scriptUrl && cfg.scriptUrl.includes('script.google.com')) {
+      try {
+        await fetch(cfg.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'saveConfig',
+            parentFolderId: cfg.parentFolderId,
+            spreadsheetId: cfg.spreadsheetId,
+            driveFolderUrl: cfg.driveFolderUrl,
+            spreadsheetUrl: cfg.spreadsheetUrl,
+            academicYear: cfg.academicYear,
+            convocationBatch: cfg.convocationBatch,
+          }),
+        });
+      } catch {
+        // Ignore GAS sync failure on fallback
+      }
     }
-    if (payload.spreadsheetUrl) {
-      const match = payload.spreadsheetUrl.match(/[-\w]{25,}/);
-      if (match) cfg.spreadsheetId = match[0];
-    }
-    if (typeof payload.scriptUrl === 'string') {
-      cfg.scriptUrl = payload.scriptUrl.trim();
-    }
-    storage.saveConfig(cfg);
 
     return {
       success: true,
       message: 'COE Google Drive storage folder & Spreadsheet configuration updated.',
+      settings: {
+        spreadsheetUrl: cfg.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${cfg.spreadsheetId}/edit`,
+        spreadsheetId: cfg.spreadsheetId,
+        driveFolderUrl: cfg.driveFolderUrl || `https://drive.google.com/drive/folders/${cfg.parentFolderId}`,
+        driveFolderId: cfg.parentFolderId,
+        scriptUrl: cfg.scriptUrl,
+        academicYear: cfg.academicYear || '2024-2025',
+        convocationBatch: cfg.convocationBatch || '34th Convocation Ceremony',
+        isCustomized: Boolean(cfg.isCustomConfig),
+      },
     };
   },
 
@@ -1191,22 +1491,50 @@ export const api = {
 
     const cleanEmail = payload.email.toLowerCase().trim();
     const cleanDept = payload.department.trim().toUpperCase();
+    const cleanSpecTokens = String(payload.specialization || 'ALL')
+      .split(/[;,]+/)
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    const cleanSpec = cleanSpecTokens.join(', ') || 'ALL';
     const faculty = storage.getFaculty();
-    const existingIdx = faculty.findIndex((f) => f.department.toUpperCase() === cleanDept && f.role === 'HOD');
+    const sameHodIdx = faculty.findIndex(
+      (f) => f.role === 'HOD' && f.email.toLowerCase() === cleanEmail && f.department.toUpperCase() === cleanDept
+    );
+    const sameSpecIdx =
+      sameHodIdx >= 0
+        ? -1
+        : faculty.findIndex(
+            (f) =>
+              f.role === 'HOD' &&
+              f.department.toUpperCase() === cleanDept &&
+              (f.specialization || 'ALL').toUpperCase() === cleanSpec
+          );
+
+    let finalSpec = cleanSpec;
+    if (sameHodIdx >= 0) {
+      const existingTokens = String(faculty[sameHodIdx].specialization || '')
+        .split(/[;,]+/)
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean);
+      const merged = Array.from(new Set([...existingTokens, ...cleanSpecTokens]));
+      finalSpec = merged.includes('ALL') ? 'ALL' : merged.join(', ') || 'ALL';
+    }
 
     const newHod: FacultyRecord = {
       email: cleanEmail,
       name: payload.name.trim(),
       role: 'HOD',
       department: cleanDept,
-      specialization: (payload.specialization || 'ALL').trim().toUpperCase(),
+      specialization: finalSpec,
       semester: 'ALL',
       batch: 'ALL',
       section: 'ALL',
     };
 
-    if (existingIdx >= 0) {
-      faculty[existingIdx] = newHod;
+    if (sameHodIdx >= 0) {
+      faculty[sameHodIdx] = newHod;
+    } else if (sameSpecIdx >= 0) {
+      faculty[sameSpecIdx] = newHod;
     } else {
       faculty.unshift(newHod);
     }
@@ -1214,12 +1542,20 @@ export const api = {
 
     return {
       success: true,
-      message: `Head of Department for ${cleanDept} assigned: ${payload.name}.`,
+      message: `Head of Department for ${cleanDept} (${finalSpec}) assigned: ${payload.name}.`,
     };
   },
 
   // COE Update Department HOD
-  async updateHod(payload: { oldEmail: string; newEmail?: string; name?: string; department?: string; specialization?: string }): Promise<ApiResponse> {
+  async updateHod(payload: {
+    oldEmail: string;
+    oldDepartment?: string;
+    oldSpecialization?: string;
+    newEmail?: string;
+    name?: string;
+    department?: string;
+    specialization?: string;
+  }): Promise<ApiResponse> {
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/update-hod'), {
@@ -1237,11 +1573,22 @@ export const api = {
     }
 
     const cleanOldEmail = payload.oldEmail.toLowerCase().trim();
+    const cleanOldDept = (payload.oldDepartment || '').trim().toUpperCase();
+    const cleanOldSpec = (payload.oldSpecialization || '').trim().toUpperCase();
     const cleanNewEmail = (payload.newEmail || cleanOldEmail).toLowerCase().trim();
     const cleanDept = (payload.department || '').trim().toUpperCase();
     const cleanName = (payload.name || '').trim();
     const faculty = storage.getFaculty();
-    const idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'HOD');
+    let idx = faculty.findIndex(
+      (f) =>
+        f.role === 'HOD' &&
+        f.email.toLowerCase() === cleanOldEmail &&
+        (!cleanOldDept || f.department.toUpperCase() === cleanOldDept) &&
+        (!cleanOldSpec || (f.specialization || 'ALL').toUpperCase() === cleanOldSpec)
+    );
+    if (idx < 0) {
+      idx = faculty.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'HOD');
+    }
 
     if (idx >= 0) {
       faculty[idx].email = cleanNewEmail;
@@ -1263,24 +1610,8 @@ export const api = {
             parentFolderId: config.parentFolderId,
             spreadsheetId: config.spreadsheetId,
             oldEmail: cleanOldEmail,
-            email: cleanNewEmail,
-            name: cleanName || (idx >= 0 ? faculty[idx].name : ''),
-            department: cleanDept || (idx >= 0 ? faculty[idx].department : ''),
-            specialization: payload.specialization || (idx >= 0 ? faculty[idx].specialization : 'ALL'),
-            role: 'HOD',
-            semester: 'ALL',
-            batch: 'ALL',
-            section: 'ALL',
-          }),
-        });
-        // Also call addHod for backwards-compatibility
-        await fetch(config.scriptUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'addHod',
-            parentFolderId: config.parentFolderId,
-            spreadsheetId: config.spreadsheetId,
+            oldDepartment: cleanOldDept,
+            oldSpecialization: cleanOldSpec,
             email: cleanNewEmail,
             name: cleanName || (idx >= 0 ? faculty[idx].name : ''),
             department: cleanDept || (idx >= 0 ? faculty[idx].department : ''),
@@ -1303,16 +1634,17 @@ export const api = {
   },
 
   // COE Delete / Remove Department HOD
-  async deleteHod(email: string, department?: string): Promise<ApiResponse> {
+  async deleteHod(email: string, department?: string, specialization?: string): Promise<ApiResponse> {
     const cleanEmail = email.toLowerCase().trim();
     const cleanDept = (department || '').trim().toUpperCase();
+    const cleanSpec = (specialization || '').trim().toUpperCase();
 
     if (canUseExpressApi()) {
       try {
         const response = await fetch(apiUrl('/api/coe/delete-hod'), {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ email: cleanEmail, department: cleanDept }),
+          body: JSON.stringify({ email: cleanEmail, department: cleanDept, specialization: cleanSpec }),
         });
         const contentType = response.headers.get('content-type') || '';
         if (response.status !== 405 && contentType.includes('application/json')) {
@@ -1324,7 +1656,13 @@ export const api = {
     }
 
     const faculty = storage.getFaculty().filter(
-      (f) => !(f.role === 'HOD' && (f.email.toLowerCase() === cleanEmail || (cleanDept && f.department.toUpperCase() === cleanDept)))
+      (f) =>
+        !(
+          f.role === 'HOD' &&
+          f.email.toLowerCase() === cleanEmail &&
+          (!cleanDept || f.department.toUpperCase() === cleanDept) &&
+          (!cleanSpec || (f.specialization || 'ALL').toUpperCase() === cleanSpec)
+        )
     );
     storage.saveFaculty(faculty);
 
@@ -1341,6 +1679,7 @@ export const api = {
             spreadsheetId: config.spreadsheetId,
             email: cleanEmail,
             department: cleanDept,
+            specialization: cleanSpec,
           }),
         });
       } catch (e) {

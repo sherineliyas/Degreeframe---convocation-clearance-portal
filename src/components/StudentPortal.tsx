@@ -89,6 +89,17 @@ export function getStreamInfo(stream: ProgramStream) {
   }
 }
 
+export function extractStudentRegFromEmail(rawEmail: string): string {
+  const clean = (rawEmail || '').toLowerCase().trim();
+  if (
+    clean.endsWith('@student.hindustanuniv.ac.in') ||
+    clean.endsWith('@hindustanuniv.ac.in')
+  ) {
+    return clean.split('@')[0].trim().toUpperCase();
+  }
+  return '';
+}
+
 export const StudentPortal: React.FC = () => {
   // Auth state
   const [email, setEmail] = useState('');
@@ -126,6 +137,7 @@ export const StudentPortal: React.FC = () => {
 
   // Step 2 & 3: Form state
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [stepError, setStepError] = useState<string | null>(null);
   const [originalData, setOriginalData] = useState<StudentRecord | null>(null);
   const [formData, setFormData] = useState({
     registerNumber: '',
@@ -148,6 +160,7 @@ export const StudentPortal: React.FC = () => {
   const [photoSizeKb, setPhotoSizeKb] = useState<number>(0);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<{ id: string; message: string } | null>(null);
   const [showGuidelines, setShowGuidelines] = useState(false);
 
@@ -156,6 +169,8 @@ export const StudentPortal: React.FC = () => {
   const [trackLoading, setTrackLoading] = useState(false);
   const [trackResult, setTrackResult] = useState<any | null>(null);
   const [trackError, setTrackError] = useState<string | null>(null);
+
+  const loggedInRegNo = isAuthenticated ? extractStudentRegFromEmail(email) : '';
 
   // Auto-correction flags
   const isNameCorrected =
@@ -217,6 +232,12 @@ export const StudentPortal: React.FC = () => {
       if (res.success) {
         setIsAuthenticated(true);
         setAuthMessage(null);
+        const regFromEmail = extractStudentRegFromEmail(targetEmail);
+        if (regFromEmail) {
+          setLookupRegNo(regFromEmail);
+          setTrackQuery(regFromEmail);
+          void handleLookup(regFromEmail, targetEmail);
+        }
       } else {
         setAuthMessage({ text: res.message || 'Verification failed', type: 'error' });
       }
@@ -232,15 +253,32 @@ export const StudentPortal: React.FC = () => {
     setOtpSent(false);
     setOtp('');
     setStep(1);
+    setStepError(null);
     setOriginalData(null);
     setSubmitSuccess(null);
+    setSubmitError(null);
+    setLookupRegNo('');
+    setLookupError(null);
+    setAlreadySubmittedInfo(null);
+    setTrackQuery('');
+    setTrackResult(null);
+    setTrackError(null);
   };
 
   // 3. Fetch student records
-  const handleLookup = async (regToFetch?: string) => {
-    const targetReg = (regToFetch || lookupRegNo).trim();
+  const handleLookup = async (regToFetch?: string, emailOverride?: string) => {
+    const activeEmail = (emailOverride || email).toLowerCase().trim();
+    const ownReg = extractStudentRegFromEmail(activeEmail);
+    const targetReg = (regToFetch || ownReg || lookupRegNo).trim().toUpperCase();
     if (!targetReg) {
       setLookupError('Please enter a valid Register Number.');
+      return;
+    }
+
+    if (ownReg && targetReg !== ownReg) {
+      setLookupError(
+        `Access Denied: You are logged in as ${activeEmail}. You can only view details for your own Register Number (${ownReg}).`
+      );
       return;
     }
 
@@ -249,7 +287,7 @@ export const StudentPortal: React.FC = () => {
     setAlreadySubmittedInfo(null);
 
     try {
-      const res = await api.getStudentData(targetReg);
+      const res = await api.getStudentData(targetReg, activeEmail);
       if (res.success && res.alreadySubmitted) {
         const d = res.data || {};
         const status = d.status || d.approvalStatus || 'PENDING_TEACHER';
@@ -379,16 +417,17 @@ export const StudentPortal: React.FC = () => {
 
   // Step 2 Proceed to Step 3
   const handleProceedToPhoto = () => {
+    setStepError(null);
     if (!formData.confirmed) {
-      alert('Please check the confirmation declaration before proceeding.');
+      setStepError('Please check the confirmation declaration before proceeding.');
       return;
     }
     if (!formData.semester?.trim()) {
-      alert('Please select your final-year Semester.');
+      setStepError('Please select your final-year Semester.');
       return;
     }
     if (!formData.section.trim()) {
-      alert('Please enter your Section.');
+      setStepError('Please enter your Section.');
       return;
     }
     setStep(3);
@@ -397,12 +436,21 @@ export const StudentPortal: React.FC = () => {
   // Final Submit
   const handleFinalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!photoDataUrl) {
       setPhotoError('Passport photograph is required.');
       return;
     }
     if (photoSizeKb > 80) {
       setPhotoError('Please compress your photo to under 80 KB before submitting.');
+      return;
+    }
+
+    const ownReg = extractStudentRegFromEmail(email);
+    if (ownReg && formData.registerNumber.trim().toUpperCase() !== ownReg) {
+      setSubmitError(
+        `Access Denied: Logged-in student ${email} can only submit an application for Register Number ${ownReg}.`
+      );
       return;
     }
 
@@ -438,26 +486,36 @@ export const StudentPortal: React.FC = () => {
           message: res.message || 'Application submitted successfully!',
         });
       } else {
-        alert(res.message || 'Submission failed.');
+        setSubmitError(res.message || 'Submission failed.');
       }
     } catch (err: any) {
-      alert(err.message || 'Error during submission');
+      setSubmitError(err.message || 'Error during submission');
     } finally {
       setSubmitLoading(false);
     }
   };
 
   // Track status lookup
-  const handleCheckStatus = async (overrideQuery?: string) => {
-    const q = (overrideQuery || trackQuery).trim();
+  const handleCheckStatus = async (overrideQuery?: string, emailOverride?: string) => {
+    const activeEmail = (emailOverride || email).toLowerCase().trim();
+    const ownReg = extractStudentRegFromEmail(activeEmail);
+    const q = (overrideQuery || ownReg || trackQuery).trim();
     if (!q) return;
+
+    if (ownReg && q.toUpperCase() !== ownReg && q.toLowerCase() !== activeEmail) {
+      setTrackResult(null);
+      setTrackError(
+        `Access Denied: You are logged in as ${activeEmail}. You can only track status for your own Register Number (${ownReg}).`
+      );
+      return;
+    }
 
     setTrackLoading(true);
     setTrackError(null);
     setTrackResult(null);
 
     try {
-      const res = await api.checkStatus(q);
+      const res = await api.checkStatus(q, activeEmail);
       if (res.success && res.data) {
         const item = res.data;
         const status = item.status || item.approvalStatus || 'PENDING_TEACHER';
@@ -636,7 +694,13 @@ export const StudentPortal: React.FC = () => {
               <span>1. Verification & Photo Upload</span>
             </button>
             <button
-              onClick={() => setActiveTab('track')}
+              onClick={() => {
+                setActiveTab('track');
+                if (loggedInRegNo) {
+                  setTrackQuery(loggedInRegNo);
+                  void handleCheckStatus(loggedInRegNo);
+                }
+              }}
               className={`py-3 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
                 activeTab === 'track'
                   ? 'bg-white text-blue-700 shadow-xs'
@@ -698,10 +762,14 @@ export const StudentPortal: React.FC = () => {
                         setSubmitSuccess(null);
                         setStep(1);
                         setPhotoDataUrl(null);
+                        if (loggedInRegNo) {
+                          setLookupRegNo(loggedInRegNo);
+                          void handleLookup(loggedInRegNo);
+                        }
                       }}
                       className="px-4 py-2.5 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl hover:bg-slate-50 transition-colors"
                     >
-                      Submit Another Record
+                      {loggedInRegNo ? 'View My Submission' : 'Back to Step 1'}
                     </button>
                   </div>
                 </div>
@@ -718,21 +786,30 @@ export const StudentPortal: React.FC = () => {
                           Fetch Student Record from University Database
                         </h3>
                         <p className="text-xs text-slate-500 mt-1">
-                          Enter your university Register Number to retrieve your official academic profile from the <code className="text-blue-700">Student_data</code> directory.
+                          {loggedInRegNo
+                            ? `Authenticated as ${email}. Your lookup is locked strictly to your Register Number (${loggedInRegNo}).`
+                            : 'Enter your university Register Number to retrieve your official academic profile from the Student_data directory.'}
                         </p>
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2.5">
                         <input
                           type="text"
-                          value={lookupRegNo}
-                          onChange={(e) => setLookupRegNo(e.target.value.toUpperCase())}
+                          value={loggedInRegNo || lookupRegNo}
+                          readOnly={Boolean(loggedInRegNo)}
+                          onChange={(e) => {
+                            if (!loggedInRegNo) setLookupRegNo(e.target.value.toUpperCase());
+                          }}
                           placeholder="ENTER REGISTER NUMBER (E.G. 19136010)"
-                          className="flex-1 px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono uppercase bg-slate-50/50"
+                          className={`flex-1 px-4 py-3 rounded-xl border text-sm font-mono uppercase ${
+                            loggedInRegNo
+                              ? 'border-slate-200 bg-slate-100 text-slate-700 font-bold cursor-not-allowed'
+                              : 'border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50/50'
+                          }`}
                         />
                         <button
-                          onClick={() => handleLookup()}
-                          disabled={lookupLoading || !lookupRegNo}
+                          onClick={() => handleLookup(loggedInRegNo || undefined)}
+                          disabled={lookupLoading || !(loggedInRegNo || lookupRegNo)}
                           className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 shrink-0"
                         >
                           {lookupLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
@@ -1052,11 +1129,21 @@ export const StudentPortal: React.FC = () => {
                         </span>
                       </label>
 
+                      {stepError && (
+                        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                          <span>{stepError}</span>
+                        </div>
+                      )}
+
                       {/* Actions */}
                       <div className="flex items-center justify-between pt-2">
                         <button
                           type="button"
-                          onClick={() => setStep(1)}
+                          onClick={() => {
+                            setStepError(null);
+                            setStep(1);
+                          }}
                           className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-1.5"
                         >
                           <ArrowLeft className="w-3.5 h-3.5" /> Back to Search
@@ -1189,11 +1276,21 @@ export const StudentPortal: React.FC = () => {
                         </div>
                       </div>
 
+                      {submitError && (
+                        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                          <span>{submitError}</span>
+                        </div>
+                      )}
+
                       {/* Action buttons */}
                       <div className="flex items-center justify-between border-t border-slate-200 pt-4">
                         <button
                           type="button"
-                          onClick={() => setStep(2)}
+                          onClick={() => {
+                            setSubmitError(null);
+                            setStep(2);
+                          }}
                           className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-1.5"
                         >
                           <ArrowLeft className="w-3.5 h-3.5" /> Back to Details
@@ -1228,21 +1325,30 @@ export const StudentPortal: React.FC = () => {
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Track Convocation Clearance Status</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Search by your Register Number or Student Email to check your real-time approval stage across Teacher and HOD clearance.
+                  {loggedInRegNo
+                    ? `Real-time approval status for your Register Number (${loggedInRegNo}) across Class Teacher and HOD clearance.`
+                    : 'Search by your Register Number or Student Email to check your real-time approval stage across Teacher and HOD clearance.'}
                 </p>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2.5">
                 <input
                   type="text"
-                  value={trackQuery}
-                  onChange={(e) => setTrackQuery(e.target.value.toUpperCase())}
+                  value={loggedInRegNo || trackQuery}
+                  readOnly={Boolean(loggedInRegNo)}
+                  onChange={(e) => {
+                    if (!loggedInRegNo) setTrackQuery(e.target.value.toUpperCase());
+                  }}
                   placeholder="ENTER REGISTER NUMBER OR EMAIL"
-                  className="flex-1 px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono uppercase bg-slate-50/50"
+                  className={`flex-1 px-4 py-3 rounded-xl border text-sm font-mono uppercase ${
+                    loggedInRegNo
+                      ? 'border-slate-200 bg-slate-100 text-slate-700 font-bold cursor-not-allowed'
+                      : 'border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50/50'
+                  }`}
                 />
                 <button
-                  onClick={() => handleCheckStatus()}
-                  disabled={trackLoading || !trackQuery}
+                  onClick={() => handleCheckStatus(loggedInRegNo || undefined)}
+                  disabled={trackLoading || !(loggedInRegNo || trackQuery)}
                   className="px-6 py-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 shrink-0"
                 >
                   {trackLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}

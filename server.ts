@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from 'express';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -8,7 +9,27 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+
+function resolvePort(): number {
+  const portFlagIdx = process.argv.indexOf('--port');
+  if (portFlagIdx !== -1 && process.argv[portFlagIdx + 1]) {
+    const cliPort = Number(process.argv[portFlagIdx + 1]);
+    if (Number.isFinite(cliPort) && cliPort > 0) return cliPort;
+  }
+  const envPort = Number(process.env.PORT);
+  // In container dev environments where nginx owns PORT=8080, bind the app port (default 3000) instead
+  if (
+    process.env.NGINX_PORT === '8080' &&
+    envPort === 8080 &&
+    !process.env.RENDER &&
+    process.env.NODE_ENV !== 'production'
+  ) {
+    return Number(process.env.DEFAULT_APP_PORT) || 3000;
+  }
+  return Number.isFinite(envPort) && envPort > 0 ? envPort : 3000;
+}
+
+const PORT = resolvePort();
 
 // Enable CORS so GitHub Pages (https://sherineliyas.github.io) and any client origin can call this Render backend without preflight failures
 app.use((req, res, next) => {
@@ -133,6 +154,8 @@ interface CoeSettings {
   scriptUrl?: string;
   academicYear: string;
   convocationBatch: string;
+  isCustomized?: boolean;
+  updatedAt?: string;
 }
 
 // Empty Database initially
@@ -252,7 +275,10 @@ function loadFacultyFromDisk() {
         for (const f of saved) {
           if (!f || !f.email) continue;
           const idx = facultyData.findIndex(
-            (e) => e.email.toLowerCase() === f.email.toLowerCase() && e.department.toUpperCase() === f.department.toUpperCase()
+            (e) =>
+              e.email.toLowerCase() === f.email.toLowerCase() &&
+              e.department.toUpperCase() === f.department.toUpperCase() &&
+              (e.specialization || 'ALL').toUpperCase() === (f.specialization || 'ALL').toUpperCase()
           );
           if (idx >= 0) {
             facultyData[idx] = { ...facultyData[idx], ...f };
@@ -303,14 +329,81 @@ function matchesStreamScope(deptBranch: string = '', streamScope: 'ALL' | 'ENGIN
   return true;
 }
 
+function splitSpecializations(specStr?: string): string[] {
+  return String(specStr || '')
+    .split(/[;,]+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function mergeSpecializations(existing?: string, added?: string): string {
+  const listA = splitSpecializations(existing);
+  const listB = splitSpecializations(added);
+  const combined = Array.from(new Set([...listA, ...listB]));
+  if (combined.length === 0) return 'ALL';
+  if (combined.includes('ALL')) return 'ALL';
+  return combined.join(', ');
+}
+
+function matchesSpecializationScope(scopeSpecStr: string | undefined, targetSpec: string | undefined): boolean {
+  const scopeList = splitSpecializations(scopeSpecStr);
+  if (scopeList.length === 0 || scopeList.includes('ALL')) return true;
+  const targetList = splitSpecializations(targetSpec);
+  if (targetList.length === 0) return false;
+  if (targetList.includes('ALL')) return false;
+  return targetList.some((t) =>
+    scopeList.some((s) => s === t || t.includes(s) || s.includes(t))
+  );
+}
+
+function extractStudentRegFromEmail(studentEmail?: string): string {
+  const clean = String(studentEmail || '').toLowerCase().trim();
+  if (!clean || !clean.includes('@')) return '';
+  if (clean.endsWith('@student.hindustanuniv.ac.in') || clean.endsWith('@hindustanuniv.ac.in')) {
+    return clean.split('@')[0].trim().toUpperCase();
+  }
+  return '';
+}
+
+const DEFAULT_SPREADSHEET_ID = '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ';
+const DEFAULT_DRIVE_FOLDER_ID = '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI';
+
+function extractGoogleResourceIdServer(input?: string): string {
+  const clean = String(input || '').trim();
+  if (!clean) return '';
+  const folderMatch = clean.match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
+  if (folderMatch && folderMatch[1]) return folderMatch[1];
+  const docMatch = clean.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (docMatch && docMatch[1]) return docMatch[1];
+  const idParamMatch = clean.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if (idParamMatch && idParamMatch[1]) return idParamMatch[1];
+  const bareMatch = clean.match(/^[a-zA-Z0-9_-]{15,}$/);
+  if (bareMatch) return clean;
+  const fallbackMatch = clean.match(/[-\w]{25,}/);
+  return fallbackMatch ? fallbackMatch[0] : '';
+}
+
+function normalizeSpreadsheetUrlServer(urlOrId: string, extractedId: string): string {
+  const clean = urlOrId.trim();
+  if (clean.startsWith('http://') || clean.startsWith('https://')) return clean;
+  return extractedId ? `https://docs.google.com/spreadsheets/d/${extractedId}/edit` : clean;
+}
+
+function normalizeDriveFolderUrlServer(urlOrId: string, extractedId: string): string {
+  const clean = urlOrId.trim();
+  if (clean.startsWith('http://') || clean.startsWith('https://')) return clean;
+  return extractedId ? `https://drive.google.com/drive/folders/${extractedId}` : clean;
+}
+
 let coeSettings: CoeSettings = {
-  spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit',
-  spreadsheetId: '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ',
-  driveFolderUrl: 'https://drive.google.com/drive/folders/1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
-  driveFolderId: '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
+  spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/edit`,
+  spreadsheetId: DEFAULT_SPREADSHEET_ID,
+  driveFolderUrl: `https://drive.google.com/drive/folders/${DEFAULT_DRIVE_FOLDER_ID}`,
+  driveFolderId: DEFAULT_DRIVE_FOLDER_ID,
   scriptUrl: process.env.GAS_WEB_APP_URL || process.env.GOOGLE_SCRIPT_URL || DEFAULT_GAS_URL,
   academicYear: '2024-2025',
   convocationBatch: '34th Convocation Ceremony',
+  isCustomized: false,
 };
 
 const CONFIG_FILE_PATH = path.resolve(__dirname, 'coe_config.json');
@@ -326,6 +419,15 @@ function loadCoeConfigFromDisk() {
       if (saved.scriptUrl) coeSettings.scriptUrl = saved.scriptUrl;
       if (saved.academicYear) coeSettings.academicYear = saved.academicYear;
       if (saved.convocationBatch) coeSettings.convocationBatch = saved.convocationBatch;
+      if (saved.updatedAt) coeSettings.updatedAt = saved.updatedAt;
+      if (
+        typeof saved.isCustomized === 'boolean'
+          ? saved.isCustomized
+          : coeSettings.spreadsheetId !== DEFAULT_SPREADSHEET_ID ||
+            coeSettings.driveFolderId !== DEFAULT_DRIVE_FOLDER_ID
+      ) {
+        coeSettings.isCustomized = true;
+      }
     }
   } catch (e) {
     console.warn('[CONFIG] Could not load coe_config.json:', e);
@@ -338,6 +440,47 @@ function saveCoeConfigToDisk() {
     fs.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(coeSettings, null, 2), 'utf-8');
   } catch (e) {
     console.warn('[CONFIG] Could not save coe_config.json:', e);
+  }
+}
+
+let cloudConfigChecked = false;
+async function restoreCoeConfigFromGasIfNeeded() {
+  if (cloudConfigChecked || coeSettings.isCustomized || fs.existsSync(CONFIG_FILE_PATH)) {
+    cloudConfigChecked = true;
+    return;
+  }
+  cloudConfigChecked = true;
+  try {
+    const gasCfg = await callGoogleAppsScript('getConfig', {}, 5000);
+    if (gasCfg && gasCfg.success && gasCfg.config) {
+      const c = gasCfg.config;
+      let changed = false;
+      if (c.spreadsheetId && String(c.spreadsheetId).trim()) {
+        coeSettings.spreadsheetId = String(c.spreadsheetId).trim();
+        coeSettings.spreadsheetUrl =
+          c.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${coeSettings.spreadsheetId}/edit`;
+        changed = true;
+      }
+      if (c.parentFolderId && String(c.parentFolderId).trim()) {
+        coeSettings.driveFolderId = String(c.parentFolderId).trim();
+        coeSettings.driveFolderUrl =
+          c.driveFolderUrl || `https://drive.google.com/drive/folders/${coeSettings.driveFolderId}`;
+        changed = true;
+      }
+      if (c.academicYear) coeSettings.academicYear = String(c.academicYear);
+      if (c.convocationBatch) coeSettings.convocationBatch = String(c.convocationBatch);
+      if (changed) {
+        coeSettings.isCustomized = Boolean(
+          c.isCustomized ||
+            coeSettings.spreadsheetId !== DEFAULT_SPREADSHEET_ID ||
+            coeSettings.driveFolderId !== DEFAULT_DRIVE_FOLDER_ID
+        );
+        coeSettings.updatedAt = c.updatedAt || new Date().toISOString();
+        saveCoeConfigToDisk();
+      }
+    }
+  } catch {
+    // Ignore cloud config restore errors
   }
 }
 
@@ -398,6 +541,7 @@ function parseCsvRows(csvText: string): string[][] {
 }
 
 let lastSheetSyncTime = 0;
+let lastFacultyMutationTime = 0;
 
 // Syncs Student_data, Faculty, and Submissions directly from the Master Google Sheet
 async function syncFromMasterSheet(force = false): Promise<boolean> {
@@ -406,6 +550,8 @@ async function syncFromMasterSheet(force = false): Promise<boolean> {
     return true;
   }
 
+  const preserveRecentFaculty = !force && lastFacultyMutationTime > 0 && now - lastFacultyMutationTime < 60 * 1000;
+
   // 1. Try Google Apps Script (Code.gs) syncMasterSheet first
   const gasSync = await callGoogleAppsScript('syncMasterSheet', {});
   if (gasSync && gasSync.success) {
@@ -413,7 +559,7 @@ async function syncFromMasterSheet(force = false): Promise<boolean> {
       studentData = gasSync.students;
       rebuildStudentIndex();
     }
-    if (Array.isArray(gasSync.faculty) && gasSync.faculty.length > 0) {
+    if (!preserveRecentFaculty && Array.isArray(gasSync.faculty) && gasSync.faculty.length > 0) {
       facultyData = gasSync.faculty;
       for (const f of facultyData) {
         const rUpper = String(f.role).toUpperCase();
@@ -475,7 +621,7 @@ async function syncFromMasterSheet(force = false): Promise<boolean> {
       rebuildStudentIndex();
     }
 
-    if (facultyRows && facultyRows.length > 1) {
+    if (!preserveRecentFaculty && facultyRows && facultyRows.length > 1) {
       facultyData = facultyRows.slice(1).filter((r) => r[0]).map((r) => ({
         email: (r[0] || '').toLowerCase(),
         name: r[1] || '',
@@ -885,21 +1031,26 @@ app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
   }
 
   if (portalType === 'faculty') {
-    let matched = facultyData.find((f) => f.email.toLowerCase() === email);
-    if (!matched) {
+    let matchedRows = facultyData.filter((f) => f.email.toLowerCase() === email);
+    if (matchedRows.length === 0) {
       await syncFromMasterSheet(true);
-      matched = facultyData.find((f) => f.email.toLowerCase() === email);
+      matchedRows = facultyData.filter((f) => f.email.toLowerCase() === email);
     }
-    if (!matched) {
+    if (matchedRows.length === 0) {
       return res.status(403).json({
         success: false,
         message: `Access Denied: ${email} is not registered in the Faculty directory. Department HODs are appointed by COE and Class Teachers are appointed by HOD.`,
       });
     }
+    const mergedSpec = matchedRows.reduce((acc, r) => mergeSpecializations(acc, r.specialization), '') || 'ALL';
+    const mergedFaculty: FacultyRecord = {
+      ...matchedRows[0],
+      specialization: mergedSpec,
+    };
     return res.json({
       success: true,
-      message: `Faculty authentication successful (${matched.role}).`,
-      faculty: matched,
+      message: `Faculty authentication successful (${mergedFaculty.role}).`,
+      faculty: mergedFaculty,
     });
   }
 
@@ -1010,6 +1161,7 @@ app.post('/api/auth/coe-login', async (req: Request, res: Response) => {
 // Get COE Settings & System Overview (Filterable by Stream Scope)
 app.get('/api/coe/overview', async (req: Request, res: Response) => {
   const forceSync = req.query.sync === 'true';
+  await restoreCoeConfigFromGasIfNeeded();
   await syncFromMasterSheet(forceSync);
 
   const streamScope = (req.query.streamScope || 'ALL').toString().toUpperCase() as 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING';
@@ -1026,6 +1178,34 @@ app.get('/api/coe/overview', async (req: Request, res: Response) => {
   const pendingHod = filteredSubmissions.filter((s) => s.approvalStatus === 'PENDING_HOD').length;
   const rejected = filteredSubmissions.filter((s) => s.approvalStatus.includes('REJECT')).length;
 
+  const deptSet = new Set<string>();
+  const specMap: Record<string, Set<string>> = {};
+  for (const s of filteredStudents) {
+    const b = String(s.branch || '').trim().toUpperCase();
+    if (!b) continue;
+    deptSet.add(b);
+    if (!specMap[b]) specMap[b] = new Set<string>();
+    const sp = String(s.specialization || '').trim().toUpperCase();
+    if (sp && sp !== 'GENERAL' && sp !== 'ALL') {
+      specMap[b].add(sp);
+    }
+  }
+  for (const s of filteredSubmissions) {
+    const b = String(s.departmentBranch || '').trim().toUpperCase();
+    if (!b) continue;
+    deptSet.add(b);
+    if (!specMap[b]) specMap[b] = new Set<string>();
+    const sp = String(s.specialization || '').trim().toUpperCase();
+    if (sp && sp !== 'GENERAL' && sp !== 'ALL') {
+      specMap[b].add(sp);
+    }
+  }
+  const departments = Array.from(deptSet).sort();
+  const specializationsByDept: Record<string, string[]> = {};
+  for (const [deptKey, setVals] of Object.entries(specMap)) {
+    specializationsByDept[deptKey] = Array.from(setVals).sort();
+  }
+
   return res.json({
     success: true,
     settings: coeSettings,
@@ -1041,6 +1221,8 @@ app.get('/api/coe/overview', async (req: Request, res: Response) => {
       streamScope,
     },
     hods: filteredHods,
+    departments,
+    specializationsByDept,
   });
 });
 
@@ -1131,6 +1313,8 @@ app.post('/api/coe/add-acoe', async (req: Request, res: Response) => {
     section: 'ALL',
   });
 
+  lastFacultyMutationTime = Date.now();
+  saveFacultyToDisk();
   saveCoeUsersToDisk();
 
   return res.json({
@@ -1160,49 +1344,125 @@ app.post('/api/coe/toggle-otp', (req: Request, res: Response) => {
   });
 });
 
-// Update ACOE Email / Info (Super Admin Action)
+// Update ACOE User Info (Super Admin Action)
 app.post('/api/coe/update-acoe', async (req: Request, res: Response) => {
-  const { oldEmail, newEmail, name, otpEnabled } = req.body;
+  const { oldEmail, newEmail, name, streamScope, role, password, otpEnabled } = req.body || {};
   const cleanOldEmail = String(oldEmail || '').toLowerCase().trim();
   const cleanNewEmail = String(newEmail || cleanOldEmail).toLowerCase().trim();
   const cleanName = String(name || '').trim();
+  const cleanScope = String(streamScope || '').toUpperCase().trim();
+  const cleanRole = String(role || '').toUpperCase().trim();
+  const cleanPassword = typeof password === 'string' ? password.trim() : '';
 
-  const user = coeUsersData.find((u) => u.email.toLowerCase() === cleanOldEmail);
+  if (!cleanOldEmail) {
+    return res.status(400).json({ success: false, message: 'Original user email (oldEmail) is required.' });
+  }
+  if (!cleanNewEmail || !cleanNewEmail.includes('@')) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid official email address.' });
+  }
+  if (cleanPassword && cleanPassword.length < 6) {
+    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+  }
+
+  let user = coeUsersData.find((u) => u.email.toLowerCase() === cleanOldEmail);
+  if (!user) {
+    const facEntry = facultyData.find(
+      (f) => f.email.toLowerCase() === cleanOldEmail && (String(f.role).toUpperCase().includes('COE'))
+    );
+    if (facEntry) {
+      user = {
+        email: facEntry.email.toLowerCase(),
+        name: facEntry.name,
+        role: 'ACOE',
+        streamScope: (facEntry.department === 'ENGINEERING' || facEntry.department === 'NON_ENGINEERING'
+          ? facEntry.department
+          : 'ALL') as any,
+        password: 'Acoe@123',
+        isDefaultPassword: true,
+        otpEnabled: true,
+      };
+      coeUsersData.push(user);
+    }
+  }
+
   if (!user) {
     return res.status(404).json({ success: false, message: `ACOE account for ${cleanOldEmail} not found.` });
   }
 
-  if (cleanNewEmail && cleanNewEmail !== cleanOldEmail) {
+  if (cleanNewEmail !== cleanOldEmail) {
+    const duplicate = coeUsersData.some((u) => u !== user && u.email.toLowerCase() === cleanNewEmail);
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: `Another user with email ${cleanNewEmail} already exists.` });
+    }
     user.email = cleanNewEmail;
+    if (user.username) {
+      user.username = cleanNewEmail.split('@')[0];
+    }
   }
+
   if (cleanName) {
     user.name = cleanName;
+  }
+  if (cleanScope === 'ALL' || cleanScope === 'ENGINEERING' || cleanScope === 'NON_ENGINEERING') {
+    user.streamScope = cleanScope;
+  }
+  if (cleanRole === 'ACOE' || cleanRole === 'COE') {
+    user.role = cleanRole as any;
+  }
+  if (cleanPassword) {
+    user.password = cleanPassword;
+    user.isDefaultPassword = cleanPassword === 'Acoe@123';
   }
   if (typeof otpEnabled === 'boolean') {
     user.otpEnabled = otpEnabled;
   }
 
-  saveCoeUsersToDisk();
-
-  // Sync with facultyData
-  const facIdx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && (f.role === 'COE' || String(f.role) === 'ACOE'));
+  // Sync with facultyData (update or insert)
+  const facIdx = facultyData.findIndex(
+    (f) => f.email.toLowerCase() === cleanOldEmail && String(f.role).toUpperCase().includes('COE')
+  );
+  const updatedFacRecord: FacultyRecord = {
+    email: user.email,
+    name: user.name,
+    role: (user.role === 'SUPER_ADMIN' ? 'ACOE' : user.role) as any,
+    department: user.streamScope || 'ALL',
+    specialization: 'ALL',
+    semester: 'ALL',
+    batch: 'ALL',
+    section: 'ALL',
+  };
   if (facIdx >= 0) {
-    facultyData[facIdx].email = user.email;
-    if (cleanName) facultyData[facIdx].name = user.name;
-    saveFacultyToDisk();
+    facultyData[facIdx] = updatedFacRecord;
+  } else {
+    facultyData.push(updatedFacRecord);
   }
+
+  lastFacultyMutationTime = Date.now();
+  saveCoeUsersToDisk();
+  saveFacultyToDisk();
 
   // Sync to Master Sheet Faculty tab
   await callGoogleAppsScript('updateAcoe', {
     oldEmail: cleanOldEmail,
     newEmail: user.email,
     name: user.name,
+    role: user.role,
+    department: user.streamScope || 'ALL',
+    streamScope: user.streamScope || 'ALL',
   });
 
   return res.json({
     success: true,
-    message: `ACOE User ${user.name} details updated successfully.`,
-    user,
+    message: `User ${user.name} (${user.email}) updated and saved across system and Master Sheet.`,
+    user: {
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      streamScope: user.streamScope || 'ALL',
+      otpEnabled: user.otpEnabled !== false,
+      isDefaultPassword: user.isDefaultPassword || false,
+      addedAt: user.addedAt,
+    },
   });
 });
 
@@ -1217,13 +1477,13 @@ app.post('/api/coe/delete-acoe', async (req: Request, res: Response) => {
   }
 
   const removed = coeUsersData.splice(idx, 1)[0];
-  saveCoeUsersToDisk();
-
   const facIdx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanEmail && (f.role === 'COE' || String(f.role) === 'ACOE'));
   if (facIdx >= 0) {
     facultyData.splice(facIdx, 1);
-    saveFacultyToDisk();
   }
+  lastFacultyMutationTime = Date.now();
+  saveCoeUsersToDisk();
+  saveFacultyToDisk();
 
   await callGoogleAppsScript('deleteAcoe', { email: cleanEmail });
 
@@ -1267,18 +1527,39 @@ app.post('/api/coe/change-password', (req: Request, res: Response) => {
 
 // Update Google Drive folder & Spreadsheet Settings
 app.post('/api/coe/config', async (req: Request, res: Response) => {
-  const { spreadsheetUrl, driveFolderUrl, scriptUrl, academicYear, convocationBatch } = req.body;
+  const {
+    spreadsheetUrl,
+    spreadsheetId,
+    driveFolderUrl,
+    driveFolderId,
+    scriptUrl,
+    academicYear,
+    convocationBatch,
+  } = req.body || {};
 
-  if (spreadsheetUrl) {
-    coeSettings.spreadsheetUrl = spreadsheetUrl;
-    const match = spreadsheetUrl.match(/[-\w]{25,}/);
-    if (match) coeSettings.spreadsheetId = match[0];
+  const prevSpreadsheetId = coeSettings.spreadsheetId;
+  let updatedDriveOrSheet = false;
+
+  const rawSheetInput = String(spreadsheetUrl || spreadsheetId || '').trim();
+  if (rawSheetInput) {
+    const extractedSheetId = extractGoogleResourceIdServer(rawSheetInput);
+    if (extractedSheetId) coeSettings.spreadsheetId = extractedSheetId;
+    coeSettings.spreadsheetUrl = normalizeSpreadsheetUrlServer(
+      rawSheetInput,
+      extractedSheetId || coeSettings.spreadsheetId
+    );
+    updatedDriveOrSheet = true;
   }
 
-  if (driveFolderUrl) {
-    coeSettings.driveFolderUrl = driveFolderUrl;
-    const match = driveFolderUrl.match(/[-\w]{25,}/);
-    if (match) coeSettings.driveFolderId = match[0];
+  const rawDriveInput = String(driveFolderUrl || driveFolderId || '').trim();
+  if (rawDriveInput) {
+    const extractedFolderId = extractGoogleResourceIdServer(rawDriveInput);
+    if (extractedFolderId) coeSettings.driveFolderId = extractedFolderId;
+    coeSettings.driveFolderUrl = normalizeDriveFolderUrlServer(
+      rawDriveInput,
+      extractedFolderId || coeSettings.driveFolderId
+    );
+    updatedDriveOrSheet = true;
   }
 
   if (typeof scriptUrl === 'string' && scriptUrl.trim()) {
@@ -1287,14 +1568,41 @@ app.post('/api/coe/config', async (req: Request, res: Response) => {
     coeSettings.scriptUrl = process.env.GOOGLE_SCRIPT_URL;
   }
 
-  if (academicYear) coeSettings.academicYear = academicYear;
-  if (convocationBatch) coeSettings.convocationBatch = convocationBatch;
+  if (academicYear && String(academicYear).trim()) coeSettings.academicYear = String(academicYear).trim();
+  if (convocationBatch && String(convocationBatch).trim()) {
+    coeSettings.convocationBatch = String(convocationBatch).trim();
+  }
+
+  if (updatedDriveOrSheet) {
+    coeSettings.isCustomized = true;
+    coeSettings.updatedAt = new Date().toISOString();
+  }
+
+  // Persist immediately to disk before waiting on external sync calls
+  saveCoeConfigToDisk();
+
+  // If Master Spreadsheet ID changed, clear stale sheet caches so the new sheet data loads cleanly
+  if (prevSpreadsheetId !== coeSettings.spreadsheetId) {
+    lastSheetSyncTime = 0;
+    studentData = [];
+    submissionsData = [];
+    rebuildStudentIndex();
+  }
+
+  // Persist configuration to Google Apps Script PropertiesService as durable cloud backup
+  await callGoogleAppsScript('saveConfig', {
+    parentFolderId: coeSettings.driveFolderId,
+    spreadsheetId: coeSettings.spreadsheetId,
+    driveFolderUrl: coeSettings.driveFolderUrl,
+    spreadsheetUrl: coeSettings.spreadsheetUrl,
+    academicYear: coeSettings.academicYear,
+    convocationBatch: coeSettings.convocationBatch,
+    isCustomized: Boolean(coeSettings.isCustomized),
+    updatedAt: coeSettings.updatedAt || new Date().toISOString(),
+  });
 
   // Automatically sync Student_data, Faculty, and Submissions from the configured Master Sheet
   await syncFromMasterSheet(true);
-
-  // Save updated configuration to disk
-  saveCoeConfigToDisk();
 
   return res.json({
     success: true,
@@ -1303,13 +1611,14 @@ app.post('/api/coe/config', async (req: Request, res: Response) => {
   });
 });
 
-// COE UI: Add / Assign Department HOD (saves directly to Faculty tab in Master Sheet)
+// COE UI: Add / Assign Department HOD (supports multiple HODs per dept for different specializations & merging specializations for same HOD)
 app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
   const { email, name, department, specialization } = req.body;
 
   const cleanEmail = String(email || '').toLowerCase().trim();
   const cleanName = String(name || '').trim();
   const cleanDept = String(department || '').trim().toUpperCase();
+  const cleanSpec = splitSpecializations(specialization || 'ALL').join(', ') || 'ALL';
 
   if (!cleanEmail || !cleanEmail.includes('@')) {
     return res.json({
@@ -1325,24 +1634,42 @@ app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
     });
   }
 
-  // Check if HOD already assigned for this dept
-  const existingIdx = facultyData.findIndex(
-    (f) => f.department.toUpperCase() === cleanDept && f.role === 'HOD'
+  // 1. Same HOD email + same department -> merge specialization scope (e.g. AI & DA + DATA SCIENCE)
+  const sameHodIdx = facultyData.findIndex(
+    (f) => f.role === 'HOD' && f.email.toLowerCase() === cleanEmail && f.department.toUpperCase() === cleanDept
   );
+
+  // 2. Different email, same department & exact same specialization -> replace that specialization's HOD
+  const sameSpecIdx =
+    sameHodIdx >= 0
+      ? -1
+      : facultyData.findIndex(
+          (f) =>
+            f.role === 'HOD' &&
+            f.department.toUpperCase() === cleanDept &&
+            (f.specialization || 'ALL').toUpperCase() === cleanSpec
+        );
+
+  const mergedSpec =
+    sameHodIdx >= 0
+      ? mergeSpecializations(facultyData[sameHodIdx].specialization, cleanSpec)
+      : cleanSpec;
 
   const newHodRecord: FacultyRecord = {
     email: cleanEmail,
     name: cleanName,
     role: 'HOD',
     department: cleanDept,
-    specialization: (specialization || 'ALL').trim().toUpperCase(),
+    specialization: mergedSpec,
     semester: 'ALL',
     batch: 'ALL',
     section: 'ALL',
   };
 
-  if (existingIdx >= 0) {
-    facultyData[existingIdx] = newHodRecord;
+  if (sameHodIdx >= 0) {
+    facultyData[sameHodIdx] = newHodRecord;
+  } else if (sameSpecIdx >= 0) {
+    facultyData[sameSpecIdx] = newHodRecord;
   } else {
     facultyData.unshift(newHodRecord);
   }
@@ -1359,54 +1686,60 @@ app.post('/api/coe/add-hod', async (req: Request, res: Response) => {
     section: 'ALL',
   });
 
+  lastFacultyMutationTime = Date.now();
   saveFacultyToDisk();
 
   return res.json({
     success: true,
-    message: `Head of Department (HOD) for ${cleanDept} assigned and saved to Master Sheet Faculty tab: ${cleanName} (${cleanEmail}).`,
+    message: `Head of Department (HOD) for ${cleanDept} (${newHodRecord.specialization}) assigned and saved to Master Sheet Faculty tab: ${cleanName} (${cleanEmail}).`,
     hod: newHodRecord,
   });
 });
 
 // COE UI: Update / Edit HOD Details
 app.post('/api/coe/update-hod', async (req: Request, res: Response) => {
-  const { oldEmail, newEmail, name, department, specialization } = req.body;
+  const { oldEmail, oldDepartment, oldSpecialization, newEmail, name, department, specialization } = req.body;
   const cleanOldEmail = String(oldEmail || '').toLowerCase().trim();
+  const cleanOldDept = String(oldDepartment || '').trim().toUpperCase();
+  const cleanOldSpec = String(oldSpecialization || '').trim().toUpperCase();
   const cleanNewEmail = String(newEmail || cleanOldEmail).toLowerCase().trim();
   const cleanName = String(name || '').trim();
   const cleanDept = String(department || '').trim().toUpperCase();
 
-  const idx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'HOD');
+  let idx = facultyData.findIndex(
+    (f) =>
+      f.role === 'HOD' &&
+      f.email.toLowerCase() === cleanOldEmail &&
+      (!cleanOldDept || f.department.toUpperCase() === cleanOldDept) &&
+      (!cleanOldSpec || (f.specialization || 'ALL').toUpperCase() === cleanOldSpec)
+  );
+  if (idx < 0) {
+    idx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanOldEmail && f.role === 'HOD');
+  }
   if (idx < 0) {
     return res.status(404).json({ success: false, message: `HOD record for ${cleanOldEmail} not found.` });
   }
 
+  const prevRecord = facultyData[idx];
   const updated: FacultyRecord = {
-    ...facultyData[idx],
+    ...prevRecord,
     email: cleanNewEmail,
-    name: cleanName || facultyData[idx].name,
-    department: cleanDept || facultyData[idx].department,
-    specialization: specialization ? String(specialization).trim().toUpperCase() : facultyData[idx].specialization,
+    name: cleanName || prevRecord.name,
+    department: cleanDept || prevRecord.department,
+    specialization: specialization
+      ? splitSpecializations(specialization).join(', ') || 'ALL'
+      : prevRecord.specialization,
   };
 
   facultyData[idx] = updated;
+  lastFacultyMutationTime = Date.now();
   saveFacultyToDisk();
 
   // Sync update directly to the Master Google Sheet Faculty tab
   await callGoogleAppsScript('updateHod', {
     oldEmail: cleanOldEmail,
-    email: cleanNewEmail,
-    name: updated.name,
-    role: 'HOD',
-    department: updated.department,
-    specialization: updated.specialization,
-    semester: 'ALL',
-    batch: 'ALL',
-    section: 'ALL',
-  });
-
-  // Also send addHod / upsertFacultyMember for backwards-compatibility with deployed scripts
-  await callGoogleAppsScript('addHod', {
+    oldDepartment: prevRecord.department,
+    oldSpecialization: prevRecord.specialization,
     email: cleanNewEmail,
     name: updated.name,
     role: 'HOD',
@@ -1426,30 +1759,40 @@ app.post('/api/coe/update-hod', async (req: Request, res: Response) => {
 
 // COE UI: Remove / Delete HOD
 app.post('/api/coe/delete-hod', async (req: Request, res: Response) => {
-  const { email, department } = req.body;
+  const { email, department, specialization } = req.body;
   const cleanEmail = String(email || '').toLowerCase().trim();
   const cleanDept = String(department || '').trim().toUpperCase();
+  const cleanSpec = String(specialization || '').trim().toUpperCase();
 
-  const idx = facultyData.findIndex(
-    (f) => f.role === 'HOD' && (f.email.toLowerCase() === cleanEmail || (cleanDept && f.department.toUpperCase() === cleanDept))
+  let idx = facultyData.findIndex(
+    (f) =>
+      f.role === 'HOD' &&
+      f.email.toLowerCase() === cleanEmail &&
+      (!cleanDept || f.department.toUpperCase() === cleanDept) &&
+      (!cleanSpec || (f.specialization || 'ALL').toUpperCase() === cleanSpec)
   );
+  if (idx < 0 && cleanEmail) {
+    idx = facultyData.findIndex((f) => f.role === 'HOD' && f.email.toLowerCase() === cleanEmail);
+  }
 
   if (idx < 0) {
     return res.status(404).json({ success: false, message: `HOD record not found.` });
   }
 
   const removed = facultyData.splice(idx, 1)[0];
+  lastFacultyMutationTime = Date.now();
   saveFacultyToDisk();
 
   // Delete row from Faculty sheet in Master Google Sheet
   await callGoogleAppsScript('deleteHod', {
     email: removed.email,
     department: removed.department,
+    specialization: removed.specialization,
   });
 
   return res.json({
     success: true,
-    message: `HOD ${removed.name} (${removed.email}) for department ${removed.department} removed and deleted from Master Sheet.`,
+    message: `HOD ${removed.name} (${removed.email}) for ${removed.department} (${removed.specialization}) removed and deleted from Master Sheet.`,
   });
 });
 
@@ -1495,6 +1838,15 @@ app.post('/api/coe/import-sheets', (req: Request, res: Response) => {
 // Lookup student data by Register Number (fetches directly from Master Sheet Student_data tab)
 app.get('/api/student/lookup/:regNo', async (req: Request, res: Response) => {
   const queryReg = req.params.regNo.trim().toUpperCase();
+  const studentEmail = String(req.query.studentEmail || '').trim();
+  const expectedReg = extractStudentRegFromEmail(studentEmail);
+
+  if (expectedReg && queryReg !== expectedReg) {
+    return res.status(403).json({
+      success: false,
+      message: `Access Denied: You are logged in as ${studentEmail}. You can only view details for your own Register Number (${expectedReg}).`,
+    });
+  }
 
   if (studentData.length === 0) {
     await syncFromMasterSheet();
@@ -1574,6 +1926,14 @@ app.post('/api/student/submit', async (req: Request, res: Response) => {
   const regNo = String(registerNumber || '').trim().toUpperCase();
   if (!regNo) {
     return res.status(400).json({ success: false, message: 'Register Number is required.' });
+  }
+
+  const expectedReg = extractStudentRegFromEmail(studentEmail);
+  if (expectedReg && regNo !== expectedReg) {
+    return res.status(403).json({
+      success: false,
+      message: `Access Denied: You are logged in as ${studentEmail}. You can only submit an application for your own Register Number (${expectedReg}).`,
+    });
   }
 
   if (!photoData) {
@@ -1692,6 +2052,15 @@ app.post('/api/student/submit', async (req: Request, res: Response) => {
 // Check Submission Status
 app.get('/api/student/status/:query', async (req: Request, res: Response) => {
   const query = req.params.query.trim().toLowerCase();
+  const studentEmail = String(req.query.studentEmail || '').trim().toLowerCase();
+  const expectedReg = extractStudentRegFromEmail(studentEmail);
+
+  if (expectedReg && query.toUpperCase() !== expectedReg && query !== studentEmail) {
+    return res.status(403).json({
+      success: false,
+      message: `Access Denied: You are logged in as ${studentEmail}. You can only track status for your own Register Number (${expectedReg}).`,
+    });
+  }
 
   const found = submissionsData.find(
     (s) =>
@@ -1701,6 +2070,12 @@ app.get('/api/student/status/:query', async (req: Request, res: Response) => {
   );
 
   if (found) {
+    if (expectedReg && found.registerNumber.toUpperCase() !== expectedReg) {
+      return res.status(403).json({
+        success: false,
+        message: `Access Denied: You can only view status for your own Register Number (${expectedReg}).`,
+      });
+    }
     const status = found.approvalStatus || 'PENDING_TEACHER';
     return res.json({
       success: true,
@@ -1719,6 +2094,12 @@ app.get('/api/student/status/:query', async (req: Request, res: Response) => {
   // Fallback to Google Apps Script (Submissions sheet) if configured
   const gasStatus = await callGoogleAppsScript('checkSubmissionStatus', { query });
   if (gasStatus && gasStatus.success) {
+    if (expectedReg && gasStatus.data?.regNo && String(gasStatus.data.regNo).toUpperCase() !== expectedReg) {
+      return res.status(403).json({
+        success: false,
+        message: `Access Denied: You can only view status for your own Register Number (${expectedReg}).`,
+      });
+    }
     return res.json(gasStatus);
   }
 
@@ -1847,24 +2228,24 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
     });
   }
 
-  let faculty = facultyData.find((f) => f.email.toLowerCase() === email);
-  if (!faculty) {
+  let matchedRows = facultyData.filter((f) => f.email.toLowerCase() === email);
+  if (matchedRows.length === 0) {
     await syncFromMasterSheet(true);
-    faculty = facultyData.find((f) => f.email.toLowerCase() === email);
+    matchedRows = facultyData.filter((f) => f.email.toLowerCase() === email);
   }
-  if (!faculty) {
+  if (matchedRows.length === 0) {
     return res.status(403).json({
       success: false,
       message: 'Faculty member not found in directory.',
     });
   }
 
-  const role = faculty.role;
+  const mergedSpec = matchedRows.reduce((acc, r) => mergeSpecializations(acc, r.specialization), '') || 'ALL';
+  const faculty: FacultyRecord = {
+    ...matchedRows[0],
+    specialization: mergedSpec,
+  };
   const dept = faculty.department.toUpperCase();
-  const spec = faculty.specialization.toUpperCase();
-  const sem = (faculty.semester || 'ALL').toUpperCase();
-  const sec = faculty.section.toUpperCase();
-  const batch = (faculty.batch || 'ALL').toUpperCase();
 
   const filtered = submissionsData.filter((sub) => {
     const subDept = sub.departmentBranch.toUpperCase();
@@ -1873,25 +2254,39 @@ app.all('/api/faculty/pending', async (req: Request, res: Response) => {
     const subSec = sub.section.toUpperCase();
     const subBatch = sub.batch.toUpperCase();
 
-    if (role === 'TEACHER') {
-      if (sub.approvalStatus !== 'PENDING_TEACHER') return false;
-      const matchDept = dept === 'ALL' || subDept === dept;
-      const matchSpec = spec === 'ALL' || subSpec === spec || subSpec.includes(spec) || spec.includes(subSpec);
-      const matchSem = sem === 'ALL' || !subSem || subSem === sem || subSem.includes(sem) || sem.includes(subSem);
-      const matchSec = sec === 'ALL' || subSec === sec;
-      const matchBatch = batch === 'ALL' || subBatch === batch || subBatch.includes(batch) || batch.includes(subBatch);
-      return matchDept && matchSpec && matchSem && matchSec && matchBatch;
-    } else if (role === 'HOD') {
-      if (sub.approvalStatus !== 'PENDING_HOD') return false;
-      const matchDept = dept === 'ALL' || subDept === dept;
-      return matchDept;
-    }
-    return false;
+    return matchedRows.some((scopeRow) => {
+      const role = scopeRow.role;
+      const scopeDept = scopeRow.department.toUpperCase();
+      const scopeSpec = scopeRow.specialization.toUpperCase();
+      const scopeSem = (scopeRow.semester || 'ALL').toUpperCase();
+      const scopeSec = scopeRow.section.toUpperCase();
+      const scopeBatch = (scopeRow.batch || 'ALL').toUpperCase();
+
+      if (role === 'TEACHER') {
+        if (sub.approvalStatus !== 'PENDING_TEACHER') return false;
+        const matchDept = scopeDept === 'ALL' || subDept === scopeDept;
+        const matchSpec = matchesSpecializationScope(scopeSpec, subSpec);
+        const matchSem = scopeSem === 'ALL' || !subSem || subSem === scopeSem || subSem.includes(scopeSem) || scopeSem.includes(subSem);
+        const matchSec = scopeSec === 'ALL' || splitSpecializations(scopeSec).includes(subSec);
+        const matchBatch = scopeBatch === 'ALL' || subBatch === scopeBatch || subBatch.includes(scopeBatch) || scopeBatch.includes(subBatch);
+        return matchDept && matchSpec && matchSem && matchSec && matchBatch;
+      } else if (role === 'HOD') {
+        if (sub.approvalStatus !== 'PENDING_HOD') return false;
+        const matchDept = scopeDept === 'ALL' || subDept === scopeDept;
+        const matchSpec = matchesSpecializationScope(scopeSpec, subSpec);
+        return matchDept && matchSpec;
+      }
+      return false;
+    });
   });
 
-  const assignedTeachers = facultyData.filter(
-    (f) => f.role === 'TEACHER' && f.department.toUpperCase() === dept
-  );
+  const assignedTeachers = facultyData.filter((f) => {
+    if (f.role !== 'TEACHER') return false;
+    if (dept !== 'ALL' && f.department.toUpperCase() !== dept) return false;
+    if (mergedSpec === 'ALL') return true;
+    const tSpec = (f.specialization || 'ALL').toUpperCase();
+    return tSpec === 'ALL' || matchesSpecializationScope(mergedSpec, tSpec);
+  });
 
   return res.json({
     success: true,
@@ -2096,15 +2491,21 @@ async function startServer() {
   app.get(['/app.js', '/gh-pages/app.js', '/public/gh-pages/app.js'], serveFallbackBundle('.js', 'application/javascript; charset=utf-8'));
   app.get(['/app.css', '/gh-pages/app.css', '/public/gh-pages/app.css'], serveFallbackBundle('.css', 'text/css; charset=utf-8'));
 
+  const httpServer = http.createServer(app);
+
   const isProduction =
     process.env.NODE_ENV === 'production' ||
-    Boolean(process.env.RENDER) ||
-    (process.env.DISABLE_HMR !== 'true' && fs.existsSync(path.join(distPath, 'index.html')));
+    Boolean(process.env.RENDER);
 
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
+    const hmrEnabled = process.env.DISABLE_HMR !== 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: process.env.DISABLE_HMR !== 'true' },
+      server: {
+        middlewareMode: true,
+        hmr: hmrEnabled ? { server: httpServer } : false,
+        watch: hmrEnabled ? undefined : null,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -2115,12 +2516,20 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`\n  VITE ready in 150 ms\n`);
     console.log(`  ➜  Local:   http://localhost:${PORT}/`);
     console.log(`  ➜  Network: http://0.0.0.0:${PORT}/\n`);
     console.log(`Convocation Clearance Portal Backend running on port ${PORT}`);
   });
+
+  httpServer.on('error', (err) => {
+    console.error(`[SERVER] Failed to bind port ${PORT}:`, err);
+    process.exit(1);
+  });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('[SERVER] Fatal startup error:', err);
+  process.exit(1);
+});

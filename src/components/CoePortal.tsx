@@ -92,8 +92,9 @@ export const CoePortal: React.FC = () => {
     name: '',
     password: '',
     role: 'ACOE',
-    streamScope: 'ENGINEERING' as 'ENGINEERING' | 'NON_ENGINEERING',
+    streamScope: 'ALL' as 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING',
   });
+  const [editingAcoeEmail, setEditingAcoeEmail] = useState<string | null>(null);
   const [isAddingAcoe, setIsAddingAcoe] = useState<boolean>(false);
 
   // COE Dashboard State
@@ -102,14 +103,19 @@ export const CoePortal: React.FC = () => {
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isManualOpen, setIsManualOpen] = useState<boolean>(false);
 
-  // Settings & Data
-  const [settings, setSettings] = useState<CoeSettings>({
-    spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit',
-    spreadsheetId: '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ',
-    driveFolderUrl: 'https://drive.google.com/drive/folders/1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
-    driveFolderId: '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
-    academicYear: '2024-2025',
-    convocationBatch: '34th Convocation Ceremony',
+  // Settings & Data (hydrated from saved browser config until server overview loads)
+  const [settings, setSettings] = useState<CoeSettings>(() => {
+    const cfg = storage.getConfig();
+    return {
+      spreadsheetUrl: cfg.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${cfg.spreadsheetId}/edit`,
+      spreadsheetId: cfg.spreadsheetId,
+      driveFolderUrl: cfg.driveFolderUrl || `https://drive.google.com/drive/folders/${cfg.parentFolderId}`,
+      driveFolderId: cfg.parentFolderId,
+      scriptUrl: cfg.scriptUrl || '',
+      academicYear: cfg.academicYear || '2024-2025',
+      convocationBatch: cfg.convocationBatch || '34th Convocation Ceremony',
+      isCustomized: Boolean(cfg.isCustomConfig),
+    };
   });
 
   const [stats, setStats] = useState<CoeOverviewStats>({
@@ -125,13 +131,21 @@ export const CoePortal: React.FC = () => {
 
   const [hods, setHods] = useState<FacultyRecord[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
+  const [serverDepartments, setServerDepartments] = useState<string[]>([]);
+  const [specializationsByDept, setSpecializationsByDept] = useState<Record<string, string[]>>({});
 
   // Form: Drive Config
-  const [driveUrlInput, setDriveUrlInput] = useState('https://drive.google.com/drive/folders/1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI');
-  const [sheetUrlInput, setSheetUrlInput] = useState('https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit');
-  const [scriptUrlInput, setScriptUrlInput] = useState('');
-  const [batchInput, setBatchInput] = useState('34th Convocation Ceremony');
-  const [yearInput, setYearInput] = useState('2024-2025');
+  const [driveUrlInput, setDriveUrlInput] = useState(() => {
+    const cfg = storage.getConfig();
+    return cfg.driveFolderUrl || `https://drive.google.com/drive/folders/${cfg.parentFolderId}`;
+  });
+  const [sheetUrlInput, setSheetUrlInput] = useState(() => {
+    const cfg = storage.getConfig();
+    return cfg.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${cfg.spreadsheetId}/edit`;
+  });
+  const [scriptUrlInput, setScriptUrlInput] = useState(() => storage.getConfig().scriptUrl || '');
+  const [batchInput, setBatchInput] = useState(() => storage.getConfig().convocationBatch || '34th Convocation Ceremony');
+  const [yearInput, setYearInput] = useState(() => storage.getConfig().academicYear || '2024-2025');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   // Form: Add HOD
@@ -163,17 +177,23 @@ export const CoePortal: React.FC = () => {
       if (res.success) {
         if (res.settings) {
           setSettings(res.settings);
-          setDriveUrlInput(res.settings.driveFolderUrl);
-          setSheetUrlInput(res.settings.spreadsheetUrl);
+          if (res.settings.driveFolderUrl) setDriveUrlInput(res.settings.driveFolderUrl);
+          if (res.settings.spreadsheetUrl) setSheetUrlInput(res.settings.spreadsheetUrl);
           setScriptUrlInput(res.settings.scriptUrl || '');
-          setBatchInput(res.settings.convocationBatch);
-          setYearInput(res.settings.academicYear);
+          if (res.settings.convocationBatch) setBatchInput(res.settings.convocationBatch);
+          if (res.settings.academicYear) setYearInput(res.settings.academicYear);
         }
         if (res.stats) {
           setStats(res.stats);
         }
         if (res.hods) {
           setHods(res.hods);
+        }
+        if (Array.isArray(res.departments)) {
+          setServerDepartments(res.departments);
+        }
+        if (res.specializationsByDept) {
+          setSpecializationsByDept(res.specializationsByDept);
         }
       }
 
@@ -331,32 +351,63 @@ export const CoePortal: React.FC = () => {
     setPasswordInput('');
   };
 
-  // Handle Add ACOE Administrator
+  const resetCoePortalAcoeForm = () => {
+    setEditingAcoeEmail(null);
+    setAcoeForm({
+      email: '',
+      name: '',
+      password: '',
+      role: 'ACOE',
+      streamScope: 'ALL',
+    });
+  };
+
+  // Handle Add / Save ACOE Administrator
   const handleAddAcoeUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!acoeForm.email.trim() || !acoeForm.name.trim()) {
       setNotification({ type: 'error', message: 'ACOE email and full name are required.' });
       return;
     }
+    if (acoeForm.password.trim() && acoeForm.password.trim().length < 6) {
+      setNotification({ type: 'error', message: 'Password must be at least 6 characters long.' });
+      return;
+    }
 
     setIsAddingAcoe(true);
     try {
-      const res = await api.addAcoeUser(acoeForm);
+      const res = editingAcoeEmail
+        ? await api.updateAcoeUser({
+            oldEmail: editingAcoeEmail,
+            newEmail: acoeForm.email.trim(),
+            name: acoeForm.name.trim(),
+            streamScope: acoeForm.streamScope,
+            role: acoeForm.role,
+            ...(acoeForm.password.trim() ? { password: acoeForm.password.trim() } : {}),
+          })
+        : await api.addAcoeUser({
+            ...acoeForm,
+            password: acoeForm.password.trim() || 'Acoe@123',
+          });
+
       if (res.success) {
-        setNotification({ type: 'success', message: res.message || 'New ACOE user appointed.' });
-        await loadAcoeUsers();
-        setAcoeForm({
-          email: '',
-          name: '',
-          password: 'Acoe@123',
-          role: 'ACOE',
-          streamScope: 'ENGINEERING',
+        setNotification({
+          type: 'success',
+          message: res.message || (editingAcoeEmail ? 'ACOE user updated successfully.' : 'New ACOE user appointed.'),
         });
+        await loadAcoeUsers();
+        resetCoePortalAcoeForm();
       } else {
-        setNotification({ type: 'error', message: res.message || 'Failed to appoint ACOE user.' });
+        setNotification({
+          type: 'error',
+          message: res.message || (editingAcoeEmail ? 'Failed to update ACOE user.' : 'Failed to appoint ACOE user.'),
+        });
       }
     } catch {
-      setNotification({ type: 'error', message: 'Error creating ACOE user account.' });
+      setNotification({
+        type: 'error',
+        message: editingAcoeEmail ? 'Error updating ACOE user details.' : 'Error creating ACOE user account.',
+      });
     } finally {
       setIsAddingAcoe(false);
     }
@@ -380,33 +431,21 @@ export const CoePortal: React.FC = () => {
     }
   };
 
-  // Edit ACOE Email / Details
-  const handleEditAcoeUser = async (user: any) => {
-    const newName = window.prompt('Update ACOE Full Name / Title:', user.name || '');
-    if (newName === null) return;
-    const newEmail = window.prompt('Update ACOE Official Email:', user.email || '');
-    if (newEmail === null) return;
-
-    if (!newEmail.trim() || !newName.trim()) {
-      setNotification({ type: 'error', message: 'Name and email cannot be empty.' });
-      return;
-    }
-
-    try {
-      const res = await api.updateAcoeUser({
-        oldEmail: user.email,
-        newEmail: newEmail.trim(),
-        name: newName.trim(),
-      });
-      if (res.success) {
-        setNotification({ type: 'success', message: res.message || 'ACOE details updated.' });
-        await loadAcoeUsers();
-      } else {
-        setNotification({ type: 'error', message: res.message || 'Failed to update user.' });
-      }
-    } catch {
-      setNotification({ type: 'error', message: 'Error updating ACOE user.' });
-    }
+  // Load ACOE User details into UI form for editing
+  const handleEditAcoeUser = (user: any) => {
+    setNotification(null);
+    const scope =
+      user.streamScope === 'ENGINEERING' || user.streamScope === 'NON_ENGINEERING'
+        ? user.streamScope
+        : 'ALL';
+    setEditingAcoeEmail(user.email);
+    setAcoeForm({
+      email: user.email || '',
+      name: user.name || '',
+      password: '',
+      role: user.role === 'COE' ? 'COE' : 'ACOE',
+      streamScope: scope,
+    });
   };
 
   // Remove ACOE User
@@ -484,6 +523,14 @@ export const CoePortal: React.FC = () => {
       });
 
       if (res.success) {
+        if (res.settings) {
+          setSettings(res.settings);
+          if (res.settings.driveFolderUrl) setDriveUrlInput(res.settings.driveFolderUrl);
+          if (res.settings.spreadsheetUrl) setSheetUrlInput(res.settings.spreadsheetUrl);
+          if (res.settings.scriptUrl !== undefined) setScriptUrlInput(res.settings.scriptUrl || '');
+          if (res.settings.convocationBatch) setBatchInput(res.settings.convocationBatch);
+          if (res.settings.academicYear) setYearInput(res.settings.academicYear);
+        }
         setNotification({
           type: 'success',
           message: 'Google Drive folder and Spreadsheet settings updated successfully.',
@@ -502,7 +549,11 @@ export const CoePortal: React.FC = () => {
     }
   };
 
-  const [editingHodEmail, setEditingHodEmail] = useState<string | null>(null);
+  const [editingHodTarget, setEditingHodTarget] = useState<{
+    email: string;
+    department: string;
+    specialization: string;
+  } | null>(null);
 
   // Handle Save / Update HOD
   const handleSaveHod = async (e: React.FormEvent) => {
@@ -517,9 +568,11 @@ export const CoePortal: React.FC = () => {
 
     try {
       let res;
-      if (editingHodEmail) {
+      if (editingHodTarget) {
         res = await api.updateHod({
-          oldEmail: editingHodEmail,
+          oldEmail: editingHodTarget.email,
+          oldDepartment: editingHodTarget.department,
+          oldSpecialization: editingHodTarget.specialization,
           newEmail: hodForm.email.trim(),
           name: hodForm.name.trim(),
           department: hodForm.department.trim(),
@@ -537,11 +590,13 @@ export const CoePortal: React.FC = () => {
       if (res.success) {
         setNotification({
           type: 'success',
-          message: editingHodEmail
-            ? `HOD details for ${hodForm.department} updated successfully.`
-            : `Head of Department for ${hodForm.department} assigned successfully.`,
+          message:
+            res.message ||
+            (editingHodTarget
+              ? `HOD details for ${hodForm.department} updated successfully.`
+              : `Head of Department for ${hodForm.department} assigned successfully.`),
         });
-        setEditingHodEmail(null);
+        setEditingHodTarget(null);
         setHodForm({
           name: '',
           email: '',
@@ -561,7 +616,11 @@ export const CoePortal: React.FC = () => {
 
   // Edit HOD Details (Populates UI Form)
   const handleEditHod = (hod: FacultyRecord) => {
-    setEditingHodEmail(hod.email);
+    setEditingHodTarget({
+      email: hod.email,
+      department: hod.department,
+      specialization: hod.specialization || 'ALL',
+    });
     setHodForm({
       name: hod.name || '',
       email: hod.email || '',
@@ -573,7 +632,7 @@ export const CoePortal: React.FC = () => {
 
   // Cancel Edit Mode
   const handleCancelHodEdit = () => {
-    setEditingHodEmail(null);
+    setEditingHodTarget(null);
     setHodForm({
       name: '',
       email: '',
@@ -583,13 +642,11 @@ export const CoePortal: React.FC = () => {
   };
 
   // Remove HOD
-  const handleRemoveHod = async (email: string) => {
-    if (!window.confirm(`Are you sure you want to remove HOD ${email}?`)) return;
-
+  const handleRemoveHod = async (hod: FacultyRecord) => {
     try {
-      const res = await api.deleteHod(email);
+      const res = await api.deleteHod(hod.email, hod.department, hod.specialization);
       if (res.success) {
-        setNotification({ type: 'success', message: res.message || `HOD ${email} removed successfully.` });
+        setNotification({ type: 'success', message: res.message || `HOD ${hod.email} removed successfully.` });
         await loadCoeData();
       } else {
         setNotification({ type: 'error', message: res.message || 'Failed to remove HOD.' });
@@ -746,10 +803,11 @@ export const CoePortal: React.FC = () => {
     return true;
   });
 
-  // Unique departments for filter and HOD appointment
+  // Unique departments for filter and HOD appointment (sourced from Student_data + fallback defaults)
   const departmentsList = Array.from(
     new Set([
-      ...storage.getStudents().map((s) => s.branch).filter(Boolean),
+      ...serverDepartments,
+      ...storage.getStudents().map((s) => String(s.branch || '').trim().toUpperCase()).filter(Boolean),
       'AERONAUTICAL ENGINEERING',
       'AEROSPACE ENGINEERING',
       'COMPUTER SCIENCE AND ENGINEERING',
@@ -759,9 +817,40 @@ export const CoePortal: React.FC = () => {
       'ELECTRICAL AND ELECTRONICS ENGINEERING',
       'ELECTRONICS AND COMMUNICATION ENGINEERING',
       'MASTER OF COMPUTER APPLICATIONS',
-      ...submissions.map((s) => s.departmentBranch).filter(Boolean),
+      ...submissions.map((s) => String(s.departmentBranch || '').trim().toUpperCase()).filter(Boolean),
     ])
   ).sort();
+
+  const selectedDeptSpecializations = Array.from(
+    new Set([
+      ...(specializationsByDept[hodForm.department.toUpperCase()] || []),
+      ...storage
+        .getStudents()
+        .filter((s) => String(s.branch || '').trim().toUpperCase() === hodForm.department.toUpperCase())
+        .map((s) => String(s.specialization || '').trim().toUpperCase())
+        .filter((sp) => sp && sp !== 'GENERAL' && sp !== 'ALL'),
+    ])
+  ).sort();
+
+  const toggleHodSpecializationToken = (specToken: string) => {
+    const cleanToken = specToken.trim().toUpperCase();
+    if (cleanToken === 'ALL') {
+      setHodForm({ ...hodForm, specialization: 'ALL' });
+      return;
+    }
+    const currentTokens = hodForm.specialization
+      .split(/[;,]+/)
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s && s !== 'ALL');
+    const exists = currentTokens.includes(cleanToken);
+    const nextTokens = exists
+      ? currentTokens.filter((t) => t !== cleanToken)
+      : [...currentTokens, cleanToken];
+    setHodForm({
+      ...hodForm,
+      specialization: nextTokens.length > 0 ? nextTokens.join(', ') : 'ALL',
+    });
+  };
 
   // -------------------------------------------------------------
   // RENDER 1: AUTHENTICATION SCREEN FOR COE & ACOE
@@ -1319,10 +1408,10 @@ export const CoePortal: React.FC = () => {
             <div className="mb-6">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-purple-700" />
-                {editingHodEmail ? 'Edit Department HOD Details' : 'Appoint Department HOD Details'}
+                {editingHodTarget ? 'Edit Department HOD Details' : 'Appoint Department HOD Details'}
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                The COE assigns the Head of Department (HOD) for each academic branch. The appointed HOD will gain authorization to appoint Class Teachers and approve convocation submissions for their department.
+                Assign the Head of Department (HOD) per academic branch or per specific specialization(s). Adding another specialization for the same HOD email automatically merges both specializations under their scope, while different specializations in the same department can each have their own HOD.
               </p>
             </div>
 
@@ -1370,7 +1459,7 @@ export const CoePortal: React.FC = () => {
                   </label>
                   <select
                     value={hodForm.department}
-                    onChange={(e) => setHodForm({ ...hodForm, department: e.target.value })}
+                    onChange={(e) => setHodForm({ ...hodForm, department: e.target.value, specialization: 'ALL' })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
                   >
                     {departmentsList.map((dept) => (
@@ -1388,12 +1477,53 @@ export const CoePortal: React.FC = () => {
                   <input
                     type="text"
                     value={hodForm.specialization}
-                    onChange={(e) => setHodForm({ ...hodForm, specialization: e.target.value })}
-                    placeholder="ALL (or specific specialization)"
+                    onChange={(e) => setHodForm({ ...hodForm, specialization: e.target.value.toUpperCase() })}
+                    placeholder="ALL (or comma-separated specializations)"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
                   />
                 </div>
               </div>
+
+              {selectedDeptSpecializations.length > 0 && (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                  <div className="text-[11px] font-semibold text-slate-600">
+                    Select one or more specializations from <span className="text-purple-800">{hodForm.department}</span> (or click ALL):
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleHodSpecializationToken('ALL')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                        hodForm.specialization.trim().toUpperCase() === 'ALL'
+                          ? 'bg-purple-700 text-white border-purple-700'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      ALL Specializations
+                    </button>
+                    {selectedDeptSpecializations.map((sp) => {
+                      const activeTokens = hodForm.specialization
+                        .split(/[;,]+/)
+                        .map((t) => t.trim().toUpperCase());
+                      const isSelected = activeTokens.includes(sp);
+                      return (
+                        <button
+                          key={sp}
+                          type="button"
+                          onClick={() => toggleHodSpecializationToken(sp)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-700 text-white border-purple-700'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          {sp}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center gap-3">
                 <button
@@ -1404,17 +1534,17 @@ export const CoePortal: React.FC = () => {
                   {isAddingHod ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      {editingHodEmail ? 'Saving HOD Updates...' : 'Assigning HOD in Database...'}
+                      {editingHodTarget ? 'Saving HOD Updates...' : 'Assigning HOD in Database...'}
                     </>
                   ) : (
                     <>
                       <UserPlus className="w-4 h-4" />
-                      {editingHodEmail ? 'Save HOD Details' : 'Appoint Head of Department'}
+                      {editingHodTarget ? 'Save HOD Details' : 'Appoint Head of Department'}
                     </>
                   )}
                 </button>
 
-                {editingHodEmail && (
+                {editingHodTarget && (
                   <button
                     type="button"
                     onClick={handleCancelHodEdit}
@@ -1474,9 +1604,9 @@ export const CoePortal: React.FC = () => {
                             >
                               Edit Details
                             </button>
-                            <button
+                              <button
                               type="button"
-                              onClick={() => handleRemoveHod(h.email)}
+                              onClick={() => handleRemoveHod(h)}
                               className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold transition-all cursor-pointer"
                             >
                               Remove
@@ -1615,16 +1745,29 @@ export const CoePortal: React.FC = () => {
       {/* ------------------------------------------------------------- */}
       {activeTab === 'acoe' && (
         <div className="space-y-6">
-          {/* Appoint ACOE Form */}
-          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-2xs">
-            <div className="mb-6">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-purple-700" />
-                Appoint New Assistant COE (ACOE) Administrator
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Super Admin can appoint additional ACOE officers. Appointed ACOEs can log in securely via 6-digit Email OTP or COE password.
-              </p>
+          {/* Appoint / Edit ACOE Form */}
+          <div className={`bg-white rounded-3xl border p-6 sm:p-8 shadow-2xs ${editingAcoeEmail ? 'border-purple-400 ring-2 ring-purple-100' : 'border-slate-200/80'}`}>
+            <div className="mb-6 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-purple-700" />
+                  {editingAcoeEmail ? `Edit ACOE User Details (${editingAcoeEmail})` : 'Appoint New Assistant COE (ACOE) Administrator'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {editingAcoeEmail
+                    ? 'Update the ACOE officer name, email, role, stream scope, or reset password.'
+                    : 'Super Admin can appoint additional ACOE officers. Appointed ACOEs can log in securely via 6-digit Email OTP or COE password.'}
+                </p>
+              </div>
+              {editingAcoeEmail && (
+                <button
+                  type="button"
+                  onClick={resetCoePortalAcoeForm}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  Cancel Edit
+                </button>
+              )}
             </div>
 
             <form onSubmit={handleAddAcoeUser} className="space-y-4 max-w-2xl">
@@ -1664,36 +1807,83 @@ export const CoePortal: React.FC = () => {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Account Role
+                  </label>
+                  <select
+                    value={acoeForm.role}
+                    onChange={(e) => setAcoeForm({ ...acoeForm, role: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white"
+                  >
+                    <option value="ACOE">ACOE (Assistant COE)</option>
+                    <option value="COE">COE (Officer)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Administrative Stream Scope
+                  </label>
+                  <select
+                    value={acoeForm.streamScope}
+                    onChange={(e) =>
+                      setAcoeForm({
+                        ...acoeForm,
+                        streamScope: e.target.value as 'ALL' | 'ENGINEERING' | 'NON_ENGINEERING',
+                      })
+                    }
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white"
+                  >
+                    <option value="ALL">ALL Streams</option>
+                    <option value="ENGINEERING">Engineering Only</option>
+                    <option value="NON_ENGINEERING">Non-Engineering Only</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Initial Security Password
+                  {editingAcoeEmail ? 'New Security Password (Optional)' : 'Initial Security Password (Optional)'}
                 </label>
                 <input
                   type="text"
-                  value={acoeForm.password || 'Acoe@123'}
+                  value={acoeForm.password}
                   onChange={(e) => setAcoeForm({ ...acoeForm, password: e.target.value })}
-                  placeholder="Acoe@123"
+                  placeholder={editingAcoeEmail ? 'Leave blank to keep existing password' : 'Defaults to Acoe@123 if blank'}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={isAddingAcoe}
-                className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-60 cursor-pointer"
-              >
-                {isAddingAcoe ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Appointing ACOE Administrator...
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4" />
-                    Appoint ACOE Administrator
-                  </>
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={isAddingAcoe}
+                  className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-60 cursor-pointer"
+                >
+                  {isAddingAcoe ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      {editingAcoeEmail ? 'Saving User Changes...' : 'Appointing ACOE Administrator...'}
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      {editingAcoeEmail ? 'Save User Changes' : 'Appoint ACOE Administrator'}
+                    </>
+                  )}
+                </button>
+                {editingAcoeEmail && (
+                  <button
+                    type="button"
+                    onClick={resetCoePortalAcoeForm}
+                    className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs sm:text-sm font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
                 )}
-              </button>
+              </div>
             </form>
           </div>
 
@@ -1747,7 +1937,7 @@ export const CoePortal: React.FC = () => {
                               onClick={() => handleEditAcoeUser(u)}
                               className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all cursor-pointer"
                             >
-                              Edit Email
+                              Edit User
                             </button>
 
                             <button

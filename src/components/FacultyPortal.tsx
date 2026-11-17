@@ -24,6 +24,27 @@ import {
   BookOpen,
 } from 'lucide-react';
 
+function splitSpecializations(raw?: string): string[] {
+  return String(raw || '')
+    .split(/[;,]+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter((s) => Boolean(s) && s !== 'ALL' && s !== 'GENERAL');
+}
+
+function matchesSpecializationScope(scopeSpec?: string, targetSpec?: string): boolean {
+  const scopeRaw = String(scopeSpec || 'ALL').trim().toUpperCase();
+  if (!scopeRaw || scopeRaw === 'ALL') return true;
+  const scopeList = splitSpecializations(scopeRaw);
+  if (scopeList.length === 0) return true;
+
+  const targetRaw = String(targetSpec || '').trim().toUpperCase();
+  if (!targetRaw || targetRaw === 'ALL') return true;
+  const targetList = splitSpecializations(targetRaw);
+  if (targetList.length === 0) return true;
+
+  return targetList.some((t) => scopeList.includes(t));
+}
+
 export const FacultyPortal: React.FC = () => {
   // Auth state
   const [email, setEmail] = useState('');
@@ -130,12 +151,20 @@ export const FacultyPortal: React.FC = () => {
   const [assignedTeachers, setAssignedTeachers] = useState<FacultyRecord[]>([]);
   const [editingTeacherEmail, setEditingTeacherEmail] = useState<string | null>(null);
 
+  const hodSpecOptions = splitSpecializations(currentFaculty?.specialization);
+
   const handleOpenAddTeacherModal = () => {
     setEditingTeacherEmail(null);
+    const defaultSpec =
+      hodSpecOptions.length === 1
+        ? hodSpecOptions[0]
+        : hodSpecOptions.length > 1
+        ? hodSpecOptions.join(', ')
+        : 'ALL';
     setNewTeacherData({
       email: '',
       name: '',
-      specialization: 'ALL',
+      specialization: defaultSpec,
       semester: 'VIII',
       batch: 'Batch A',
       section: 'A',
@@ -191,9 +220,13 @@ export const FacultyPortal: React.FC = () => {
         setAssignedTeachers(res.assignedTeachers);
       } else {
         const targetDept = (res.faculty?.department || currentFaculty?.department || '').toUpperCase();
+        const targetSpec = (res.faculty?.specialization || currentFaculty?.specialization || 'ALL').toUpperCase();
         if (targetDept) {
           const localTeachers = storage.getFaculty().filter(
-            (f) => f.role === 'TEACHER' && f.department.toUpperCase() === targetDept
+            (f) =>
+              f.role === 'TEACHER' &&
+              f.department.toUpperCase() === targetDept &&
+              matchesSpecializationScope(targetSpec, f.specialization)
           );
           setAssignedTeachers(localTeachers);
         }
@@ -506,7 +539,10 @@ export const FacultyPortal: React.FC = () => {
                     Appointed Class Teachers Directory ({assignedTeachers.length})
                   </h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Class teachers appointed for section-level student verification in {currentFaculty.department}.
+                    Class teachers appointed for section-level student verification in {currentFaculty.department}
+                    {currentFaculty.specialization && currentFaculty.specialization !== 'ALL'
+                      ? ` (${currentFaculty.specialization})`
+                      : ''}.
                   </p>
                 </div>
                 <button
@@ -583,7 +619,11 @@ export const FacultyPortal: React.FC = () => {
               <p className="text-xs text-slate-500 mt-0.5">
                 {currentFaculty.role === 'TEACHER'
                   ? `Filtered strictly to ${currentFaculty.department} • Sec ${currentFaculty.section} • ${currentFaculty.batch}`
-                  : `Filtered to all forwarded submissions in ${currentFaculty.department}`}
+                  : `Filtered to all forwarded submissions in ${currentFaculty.department}${
+                      currentFaculty.specialization && currentFaculty.specialization !== 'ALL'
+                        ? ` • ${currentFaculty.specialization}`
+                        : ''
+                    }`}
               </p>
             </div>
             <button
@@ -911,13 +951,54 @@ export const FacultyPortal: React.FC = () => {
                     type="text"
                     value={newTeacherData.specialization}
                     onChange={(e) =>
-                      setNewTeacherData({ ...newTeacherData, specialization: e.target.value })
+                      setNewTeacherData({ ...newTeacherData, specialization: e.target.value.toUpperCase() })
                     }
-                    placeholder="e.g. ALL or AI"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl"
+                    placeholder="e.g. ALL or DATA SCIENCE"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl uppercase"
                   />
                 </div>
               </div>
+
+              {hodSpecOptions.length > 0 && (
+                <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-2.5 space-y-1.5">
+                  <span className="text-[11px] font-semibold text-amber-900 block">
+                    Your Assigned Specialization Scope (click to select):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {hodSpecOptions.map((sp) => {
+                      const activeSpecs = splitSpecializations(newTeacherData.specialization);
+                      const isSelected = activeSpecs.includes(sp);
+                      return (
+                        <button
+                          key={sp}
+                          type="button"
+                          onClick={() => {
+                            if (hodSpecOptions.length === 1) {
+                              setNewTeacherData({ ...newTeacherData, specialization: sp });
+                              return;
+                            }
+                            const next = isSelected
+                              ? activeSpecs.filter((item) => item !== sp)
+                              : [...activeSpecs, sp];
+                            setNewTeacherData({
+                              ...newTeacherData,
+                              specialization: next.length > 0 ? next.join(', ') : hodSpecOptions.join(', '),
+                            });
+                          }}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-amber-500 text-white border-amber-600'
+                              : 'bg-white text-slate-700 border-amber-300 hover:bg-amber-100'
+                          }`}
+                        >
+                          {isSelected ? '✓ ' : '+ '}
+                          {sp}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>

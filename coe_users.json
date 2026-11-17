@@ -1,0 +1,39 @@
+[
+  {
+    "username": "superadmin",
+    "email": "superadmin@hindustanuniv.ac.in",
+    "name": "Chief COE Super Admin",
+    "role": "SUPER_ADMIN",
+    "streamScope": "ALL",
+    "password": "Admin@123",
+    "isDefaultPassword": true,
+    "otpEnabled": true
+  },
+  {
+    "email": "dycoe@hindustanuniv.ac.in",
+    "name": "Dr. Dycoe (ACOE)",
+    "role": "ACOE",
+    "streamScope": "ALL",
+    "password": "Acoe@123",
+    "isDefaultPassword": true,
+    "otpEnabled": true
+  },
+  {
+    "email": "acoe@hindustanuniv.ac.in",
+    "name": "Controller of Examinations (ACOE)",
+    "role": "ACOE",
+    "streamScope": "ALL",
+    "password": "Acoe@123",
+    "isDefaultPassword": true,
+    "otpEnabled": true
+  },
+  {
+    "email": "sherine@hindustanuniv.ac.in",
+    "name": "Dr. Sherin Eliyas (ACOE)",
+    "role": "ACOE",
+    "streamScope": "ALL",
+    "password": "Acoe@123",
+    "isDefaultPassword": true,
+    "otpEnabled": true
+  }
+]

@@ -1,8 +1,22 @@
 // ==========================================
 // CONFIGURATION (Defaults — dynamically overridden when updated in COE Portal)
 // ==========================================
-let PARENT_FOLDER_ID = "1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI"; 
-let SPREADSHEET_ID = "1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ"; 
+const DEFAULT_PARENT_FOLDER_ID = "1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI"; 
+const DEFAULT_SPREADSHEET_ID = "1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ"; 
+let PARENT_FOLDER_ID = DEFAULT_PARENT_FOLDER_ID;
+let SPREADSHEET_ID = DEFAULT_SPREADSHEET_ID;
+
+function loadStoredConfig_() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const savedFolder = props.getProperty("PARENT_FOLDER_ID");
+    const savedSheet = props.getProperty("SPREADSHEET_ID");
+    if (savedFolder && String(savedFolder).trim()) PARENT_FOLDER_ID = String(savedFolder).trim();
+    if (savedSheet && String(savedSheet).trim()) SPREADSHEET_ID = String(savedSheet).trim();
+  } catch (e) {
+    Logger.log("Could not read ScriptProperties: " + e.toString());
+  }
+}
 
 // ==========================================
 // REST API ROUTER
@@ -42,6 +56,7 @@ function doPost(e) {
       return createJsonResponse(false, "Empty request body received.");
     }
 
+    loadStoredConfig_();
     const payload = JSON.parse(e.postData.contents);
     if (payload.parentFolderId && String(payload.parentFolderId).trim()) {
       PARENT_FOLDER_ID = String(payload.parentFolderId).trim();
@@ -181,6 +196,14 @@ function doPost(e) {
 
       case "syncMasterSheet":
         responseData = handleSyncMasterSheet();
+        break;
+
+      case "saveConfig":
+        responseData = handleSaveConfig(payload);
+        break;
+
+      case "getConfig":
+        responseData = handleGetConfig();
         break;
 
       default:
@@ -638,6 +661,49 @@ function writeToSheet(sheet, rowIndex, rowData) {
 // 2. FACULTY MODULE & AUTHENTICATION LOGIC
 // ==========================================
 
+function splitSpecializationsGas(raw) {
+  const parts = String(raw || "").split(/[;,]+/);
+  const result = [];
+  for (let i = 0; i < parts.length; i++) {
+    const clean = parts[i].trim().toUpperCase();
+    if (clean && clean !== "ALL" && clean !== "GENERAL" && result.indexOf(clean) === -1) {
+      result.push(clean);
+    }
+  }
+  return result;
+}
+
+function mergeSpecializationsGas(existingSpec, incomingSpec) {
+  const a = String(existingSpec || "ALL").trim().toUpperCase();
+  const b = String(incomingSpec || "ALL").trim().toUpperCase();
+  if (b === "ALL") return "ALL";
+  if (!a || a === "ALL" || a === "GENERAL") return b || "ALL";
+  const listA = splitSpecializationsGas(a);
+  const listB = splitSpecializationsGas(b);
+  const combined = listA.slice();
+  for (let i = 0; i < listB.length; i++) {
+    if (combined.indexOf(listB[i]) === -1) combined.push(listB[i]);
+  }
+  return combined.length > 0 ? combined.join(", ") : "ALL";
+}
+
+function matchesSpecializationScopeGas(scopeSpec, targetSpec) {
+  const rawScope = String(scopeSpec || "ALL").trim().toUpperCase();
+  if (!rawScope || rawScope === "ALL") return true;
+  const scopeList = splitSpecializationsGas(rawScope);
+  if (scopeList.length === 0) return true;
+
+  const rawTarget = String(targetSpec || "").trim().toUpperCase();
+  if (!rawTarget || rawTarget === "ALL") return true;
+  const targetList = splitSpecializationsGas(rawTarget);
+  if (targetList.length === 0) return true;
+
+  for (let i = 0; i < targetList.length; i++) {
+    if (scopeList.indexOf(targetList[i]) !== -1) return true;
+  }
+  return false;
+}
+
 function handleFacultyLogin(email) {
   const cleanEmail = String(email || "").trim().toLowerCase();
 
@@ -665,10 +731,11 @@ function handleFacultyLogin(email) {
 
       scopes.push({
         role: String(data[i][2]).toUpperCase().trim(),
-        department: String(data[i][3]).toUpperCase().trim(),
-        specialization: String(data[i][4]).toUpperCase().trim(),
-        section: String(data[i][5]).toUpperCase().trim(),
-        batch: String(data[i][6] || "ALL").toUpperCase().trim()
+        department: String(data[i][3] || "ALL").toUpperCase().trim(),
+        specialization: String(data[i][4] || "ALL").toUpperCase().trim(),
+        semester: String(data[i][5] || "ALL").toUpperCase().trim(),
+        batch: String(data[i][6] || "ALL").toUpperCase().trim(),
+        section: String(data[i][7] || data[i][5] || "ALL").toUpperCase().trim()
       });
     }
   }
@@ -680,6 +747,11 @@ function handleFacultyLogin(email) {
     };
   }
 
+  let mergedSpecialization = scopes[0].specialization || "ALL";
+  for (let s = 1; s < scopes.length; s++) {
+    mergedSpecialization = mergeSpecializationsGas(mergedSpecialization, scopes[s].specialization);
+  }
+
   return { 
     success: true, 
     faculty: {
@@ -687,7 +759,8 @@ function handleFacultyLogin(email) {
       name: facultyName,
       role: primaryRole,
       department: scopes[0].department,
-      specialization: scopes.map(s => s.specialization).join(", "),
+      specialization: mergedSpecialization,
+      semester: scopes[0].semester,
       section: scopes[0].section,
       batch: scopes[0].batch,
       scopes: scopes // Full list of assigned permissions
@@ -729,7 +802,7 @@ function getSubmissionsForReview(payload) {
 
       if (scope.role === "TEACHER" && status === "PENDING_TEACHER") {
         const matchDept = (scope.department === "ALL" || scope.department === dept);
-        const matchSpec = (scope.specialization === "ALL" || scope.specialization === spec);
+        const matchSpec = matchesSpecializationScopeGas(scope.specialization, spec);
         const matchSec = (scope.section === "ALL" || scope.section === sec);
         const matchBatch = (scope.batch === "ALL" || scope.batch === batch);
 
@@ -739,7 +812,8 @@ function getSubmissionsForReview(payload) {
         }
       } else if (scope.role === "HOD" && status === "PENDING_HOD") {
         const matchDept = (scope.department === "ALL" || scope.department === dept);
-        if (matchDept) {
+        const matchSpec = matchesSpecializationScopeGas(scope.specialization, spec);
+        if (matchDept && matchSpec) {
           isEligible = true;
           break;
         }
@@ -995,7 +1069,48 @@ function handleUpsertFacultyMember(payload) {
   const data = sheet.getDataRange().getValues();
   const rowData = [email, name, role, department, specialization, semester, batch, section];
 
-  // Check if same email + role + department + section already exists
+  if (role === "HOD") {
+    // 1. If the same HOD email + department already exists, merge the additional specialization (e.g. AI & DA + DATA SCIENCE)
+    for (let i = 1; i < data.length; i++) {
+      const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+      const rowRole = String(data[i][2] || "").trim().toUpperCase();
+      const rowDept = String(data[i][3] || "").trim().toUpperCase();
+      const rowSpec = String(data[i][4] || "ALL").trim().toUpperCase();
+
+      if (rowRole === "HOD" && rowEmail === email && rowDept === department) {
+        const mergedSpec = mergeSpecializationsGas(rowSpec, specialization);
+        const updatedRow = [email, name, role, department, mergedSpec, semester, batch, section];
+        sheet.getRange(i + 1, 1, 1, updatedRow.length).setValues([updatedRow]);
+        return {
+          success: true,
+          message: `HOD record for ${name} (${email}) updated in Faculty sheet (${mergedSpec}).`
+        };
+      }
+    }
+
+    // 2. If assigning a different HOD to the exact same department + specialization, update that specific entry
+    for (let i = 1; i < data.length; i++) {
+      const rowRole = String(data[i][2] || "").trim().toUpperCase();
+      const rowDept = String(data[i][3] || "").trim().toUpperCase();
+      const rowSpec = String(data[i][4] || "ALL").trim().toUpperCase();
+
+      if (rowRole === "HOD" && rowDept === department && rowSpec === specialization) {
+        sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+        return {
+          success: true,
+          message: `HOD record for ${name} (${email}) updated for ${department} - ${specialization}.`
+        };
+      }
+    }
+
+    sheet.appendRow(rowData);
+    return {
+      success: true,
+      message: `HOD record for ${name} (${email}) saved for ${department} (${specialization}).`
+    };
+  }
+
+  // Check if same email + role + department + section already exists for ACOE/TEACHER
   for (let i = 1; i < data.length; i++) {
     const rowEmail = String(data[i][0] || "").trim().toLowerCase();
     const rowRole = String(data[i][2] || "").trim().toUpperCase();
@@ -1003,7 +1118,6 @@ function handleUpsertFacultyMember(payload) {
     const rowSec = String(data[i][7] || data[i][5] || "").trim().toUpperCase();
 
     if (
-      (role === "HOD" && rowRole === "HOD" && rowDept === department) ||
       (role === "ACOE" && rowEmail === email) ||
       (rowEmail === email && rowRole === role && rowDept === department && rowSec === section)
     ) {
@@ -1025,6 +1139,8 @@ function handleUpsertFacultyMember(payload) {
 // Dedicated HOD Update Handler (Updates Name, Email, Department, Scope in Master Sheet)
 function handleUpdateHod(payload) {
   const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
+  const oldDepartment = String(payload.oldDepartment || "").trim().toUpperCase();
+  const oldSpecialization = String(payload.oldSpecialization || "").trim().toUpperCase();
   const newEmail = String(payload.email || payload.newEmail || oldEmail).trim().toLowerCase();
   const name = String(payload.name || "").trim();
   const department = String(payload.department || "").trim().toUpperCase();
@@ -1039,13 +1155,26 @@ function handleUpdateHod(payload) {
   const data = sheet.getDataRange().getValues();
   const rowData = [newEmail, name, "HOD", department, specialization, semester, batch, section];
 
-  // Match by oldEmail or by Department where role is HOD
+  // Match exact HOD entry using oldEmail + oldDepartment + oldSpecialization when supplied
   for (let i = 1; i < data.length; i++) {
     const rowEmail = String(data[i][0] || "").trim().toLowerCase();
     const rowRole = String(data[i][2] || "").trim().toUpperCase();
     const rowDept = String(data[i][3] || "").trim().toUpperCase();
+    const rowSpec = String(data[i][4] || "ALL").trim().toUpperCase();
 
-    if (rowRole === "HOD" && (rowEmail === oldEmail || (department && rowDept === department))) {
+    const matchesOldKey =
+      oldEmail &&
+      rowEmail === oldEmail &&
+      (!oldDepartment || rowDept === oldDepartment) &&
+      (!oldSpecialization || rowSpec === oldSpecialization);
+
+    const matchesExactSlot =
+      !oldEmail &&
+      department &&
+      rowDept === department &&
+      rowSpec === specialization;
+
+    if (rowRole === "HOD" && (matchesOldKey || matchesExactSlot)) {
       sheet.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
       return {
         success: true,
@@ -1065,6 +1194,7 @@ function handleUpdateHod(payload) {
 function handleDeleteHod(payload) {
   const email = String(payload.email || "").trim().toLowerCase();
   const department = String(payload.department || "").trim().toUpperCase();
+  const specialization = String(payload.specialization || "").trim().toUpperCase();
 
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
   if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
@@ -1074,8 +1204,13 @@ function handleDeleteHod(payload) {
     const rowEmail = String(data[i][0] || "").trim().toLowerCase();
     const rowRole = String(data[i][2] || "").trim().toUpperCase();
     const rowDept = String(data[i][3] || "").trim().toUpperCase();
+    const rowSpec = String(data[i][4] || "ALL").trim().toUpperCase();
 
-    if (rowRole === "HOD" && (rowEmail === email || (department && rowDept === department))) {
+    const matchEmail = !email || rowEmail === email;
+    const matchDept = !department || rowDept === department;
+    const matchSpec = !specialization || rowSpec === specialization;
+
+    if (rowRole === "HOD" && matchEmail && matchDept && matchSpec) {
       sheet.deleteRow(i + 1);
       return {
         success: true,
@@ -1150,6 +1285,8 @@ function handleUpdateAcoe(payload) {
   const oldEmail = String(payload.oldEmail || "").trim().toLowerCase();
   const newEmail = String(payload.newEmail || oldEmail).trim().toLowerCase();
   const name = String(payload.name || "").trim();
+  const role = String(payload.role || "ACOE").trim().toUpperCase();
+  const department = String(payload.department || payload.streamScope || "ALL").trim().toUpperCase();
 
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Faculty");
   if (!sheet) return { success: false, message: "'Faculty' sheet not found in Master Google Sheet." };
@@ -1159,13 +1296,17 @@ function handleUpdateAcoe(payload) {
     const rowEmail = String(data[i][0] || "").trim().toLowerCase();
     const rowRole = String(data[i][2] || "").trim().toUpperCase();
 
-    if (rowRole === "ACOE" && rowEmail === oldEmail) {
+    if (rowRole.indexOf("COE") !== -1 && rowEmail === oldEmail) {
       sheet.getRange(i + 1, 1).setValue(newEmail);
       if (name) sheet.getRange(i + 1, 2).setValue(name);
-      return { success: true, message: `ACOE updated in Faculty sheet.` };
+      sheet.getRange(i + 1, 3).setValue(role);
+      sheet.getRange(i + 1, 4).setValue(department);
+      return { success: true, message: `ACOE user ${name || newEmail} updated in Faculty sheet.` };
     }
   }
-  return { success: false, message: "ACOE not found in Faculty sheet." };
+
+  sheet.appendRow([newEmail, name || newEmail, role, department, "ALL", "ALL", "ALL", "ALL"]);
+  return { success: true, message: `ACOE user ${name || newEmail} saved to Faculty sheet.` };
 }
 
 // Dedicated ACOE Deletion Handler
@@ -1281,4 +1422,64 @@ function handleSyncMasterSheet() {
     submissions: submissions
   };
 }
+
+function handleSaveConfig(payload) {
+  const props = PropertiesService.getScriptProperties();
+  const folderId = String(payload.parentFolderId || payload.driveFolderId || PARENT_FOLDER_ID || DEFAULT_PARENT_FOLDER_ID).trim();
+  const sheetId = String(payload.spreadsheetId || SPREADSHEET_ID || DEFAULT_SPREADSHEET_ID).trim();
+  const driveFolderUrl = String(payload.driveFolderUrl || ("https://drive.google.com/drive/folders/" + folderId)).trim();
+  const spreadsheetUrl = String(payload.spreadsheetUrl || ("https://docs.google.com/spreadsheets/d/" + sheetId + "/edit")).trim();
+  const academicYear = String(payload.academicYear || props.getProperty("ACADEMIC_YEAR") || "2024-2025").trim();
+  const convocationBatch = String(payload.convocationBatch || props.getProperty("CONVOCATION_BATCH") || "34th Convocation Ceremony").trim();
+  const updatedAt = String(payload.updatedAt || new Date().toISOString()).trim();
+
+  PARENT_FOLDER_ID = folderId;
+  SPREADSHEET_ID = sheetId;
+
+  props.setProperties({
+    PARENT_FOLDER_ID: folderId,
+    SPREADSHEET_ID: sheetId,
+    DRIVE_FOLDER_URL: driveFolderUrl,
+    SPREADSHEET_URL: spreadsheetUrl,
+    ACADEMIC_YEAR: academicYear,
+    CONVOCATION_BATCH: convocationBatch,
+    IS_CUSTOMIZED: "true",
+    UPDATED_AT: updatedAt
+  });
+
+  return {
+    success: true,
+    message: "Google Drive Folder and Master Sheet configuration saved to Script Properties.",
+    config: {
+      parentFolderId: folderId,
+      spreadsheetId: sheetId,
+      driveFolderUrl: driveFolderUrl,
+      spreadsheetUrl: spreadsheetUrl,
+      academicYear: academicYear,
+      convocationBatch: convocationBatch,
+      isCustomized: true,
+      updatedAt: updatedAt
+    }
+  };
+}
+
+function handleGetConfig() {
+  const props = PropertiesService.getScriptProperties();
+  const folderId = (props.getProperty("PARENT_FOLDER_ID") || DEFAULT_PARENT_FOLDER_ID).trim();
+  const sheetId = (props.getProperty("SPREADSHEET_ID") || DEFAULT_SPREADSHEET_ID).trim();
+  return {
+    success: true,
+    config: {
+      parentFolderId: folderId,
+      spreadsheetId: sheetId,
+      driveFolderUrl: props.getProperty("DRIVE_FOLDER_URL") || ("https://drive.google.com/drive/folders/" + folderId),
+      spreadsheetUrl: props.getProperty("SPREADSHEET_URL") || ("https://docs.google.com/spreadsheets/d/" + sheetId + "/edit"),
+      academicYear: props.getProperty("ACADEMIC_YEAR") || "2024-2025",
+      convocationBatch: props.getProperty("CONVOCATION_BATCH") || "34th Convocation Ceremony",
+      isCustomized: props.getProperty("IS_CUSTOMIZED") === "true",
+      updatedAt: props.getProperty("UPDATED_AT") || ""
+    }
+  };
+}
+
 

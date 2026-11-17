@@ -80,6 +80,8 @@ export interface CoeSettings {
   scriptUrl?: string;
   academicYear: string;
   convocationBatch: string;
+  isCustomized?: boolean;
+  updatedAt?: string;
 }
 
 export interface CoeUserRecord {

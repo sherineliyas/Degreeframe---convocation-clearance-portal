@@ -15,14 +15,26 @@ export interface AppConfig {
   scriptUrl: string;
   useLiveScript: boolean;
   spreadsheetId: string;
+  spreadsheetUrl?: string;
   parentFolderId: string;
+  driveFolderUrl?: string;
+  academicYear?: string;
+  convocationBatch?: string;
+  isCustomConfig?: boolean;
+  configUpdatedAt?: number;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbwFHBlRVUWt06sCFEGRuR0B7aKvGQgt6mNDaeU9xJE/exec',
   useLiveScript: true,
   spreadsheetId: '1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ',
+  spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit',
   parentFolderId: '1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
+  driveFolderUrl: 'https://drive.google.com/drive/folders/1w3hVMlTQNVUh7Bpru_cwlEJ6TQ77kfqI',
+  academicYear: '2024-2025',
+  convocationBatch: '34th Convocation Ceremony',
+  isCustomConfig: false,
+  configUpdatedAt: 0,
 };
 
 class StorageService {

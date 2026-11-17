@@ -29,7 +29,6 @@ import { api } from '../services/api';
 import { storage } from '../services/store';
 import { UserManualModal } from './UserManualModal';
 import { FacultyRecord, SubmissionRecord, CoeSettings, CoeOverviewStats } from '../types';
-import { downloadMasterExcelTemplate } from '../utils/excelTemplate';
 import { formatDriveImageUrl, extractDriveFileId, DEFAULT_AVATAR_SVG, handlePassportImageError } from '../utils/imageUtils';
 
 interface CoeUserInfo {
@@ -98,7 +97,7 @@ export const CoePortal: React.FC = () => {
   const [isAddingAcoe, setIsAddingAcoe] = useState<boolean>(false);
 
   // COE Dashboard State
-  const [activeTab, setActiveTab] = useState<'overview' | 'drive' | 'sheets' | 'hods' | 'acoe' | 'submissions'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'drive' | 'hods' | 'acoe' | 'submissions'>('overview');
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isManualOpen, setIsManualOpen] = useState<boolean>(false);
@@ -1166,17 +1165,7 @@ export const CoePortal: React.FC = () => {
           Assign HOD Details
         </button>
 
-        <button
-          onClick={() => setActiveTab('sheets')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'sheets'
-              ? 'bg-purple-700 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <FileSpreadsheet className="w-4 h-4" />
-          Master Google Sheet
-        </button>
+
 
         <button
           onClick={() => setActiveTab('submissions')}
@@ -1717,122 +1706,7 @@ export const CoePortal: React.FC = () => {
         </div>
       )}
 
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 4: MASTER GOOGLE SHEET ARCHITECTURE & SYNC */}
-      {/* ------------------------------------------------------------- */}
-      {activeTab === 'sheets' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-2xs space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <FileSpreadsheet className="w-5 h-5 text-purple-700" />
-                  Master Google Sheet Live Database
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  All student records, faculty appointments, and clearance submissions are automatically read from and saved directly to your connected 3-tab Master Google Sheet.
-                </p>
-              </div>
 
-              <div className="flex flex-wrap items-center gap-2 self-start">
-                <button
-                  type="button"
-                  onClick={downloadMasterExcelTemplate}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Download 3-Tab Master Excel (.xlsx)
-                </button>
-
-                {settings.spreadsheetUrl && (
-                  <a
-                    href={settings.spreadsheetUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold border border-purple-200 transition-all flex items-center gap-1.5"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Open Live Google Sheet
-                  </a>
-                )}
-              </div>
-            </div>
-
-            {/* Master Google Spreadsheet URL Config */}
-            <form onSubmit={handleSaveConfig} className="space-y-4 max-w-2xl">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Master Google Spreadsheet URL or ID
-                </label>
-                <input
-                  type="text"
-                  value={sheetUrlInput}
-                  onChange={(e) => setSheetUrlInput(e.target.value)}
-                  placeholder="https://docs.google.com/spreadsheets/d/1a-wxvfyMzC6zmcyoWBFzzrFjysyituOVfvoXtxvVNPQ/edit"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all"
-                  required
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  No separate student upload is required—students are fetched directly from the <code className="text-purple-700">Student_data</code> tab of this Master Sheet.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={isSavingConfig}
-                  className="px-5 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs sm:text-sm font-semibold shadow-xs transition-all flex items-center gap-2 disabled:opacity-60 cursor-pointer"
-                >
-                  {isSavingConfig ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Syncing Master Sheet...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      Save & Sync Master Google Sheet
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-
-            {/* 3-Tab Automated Data Flow Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="text-xs font-bold text-slate-900 mb-1 flex items-center justify-between">
-                  <span>1. Student_data (9 Cols)</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-800">Auto-Read</span>
-                </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Pre-populated in your Master Google Sheet. When a student enters their Register Number, their profile is fetched directly from this tab.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="text-xs font-bold text-slate-900 mb-1 flex items-center justify-between">
-                  <span>2. Faculty (8 Cols)</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-100 text-purple-800">Auto-Saved</span>
-                </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Whenever Super Admin adds an ACOE, COE assigns a Department HOD, or an HOD assigns a Class Teacher, it is automatically saved to this tab.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="text-xs font-bold text-slate-900 mb-1 flex items-center justify-between">
-                  <span>3. Submissions (22 Cols)</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-800">Auto-Saved</span>
-                </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Student photo submissions (<code className="text-emerald-800">&lt;RegNo&gt;.jpg</code> Drive URLs) and Class Teacher / HOD approvals are automatically recorded in this tab.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ------------------------------------------------------------- */}
       {/* TAB 6: SUPER ADMIN ACOE DIRECTORY & OTP CONTROLS */}

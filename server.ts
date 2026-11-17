@@ -2672,41 +2672,54 @@ app.post('/api/faculty/add-teacher', async (req: Request, res: Response) => {
   }
 
   const cleanEmail = String(teacherEmail).toLowerCase().trim();
-  const newTeacher: FacultyRecord = {
-    email: cleanEmail,
-    name: String(teacherName).trim(),
-    role: 'TEACHER',
-    department: requestedDept,
-    specialization: specialization || 'ALL',
-    semester: String(semester || 'VIII').trim().toUpperCase(),
-    batch: batch || 'Batch A',
-    section: String(section || 'A').toUpperCase().trim(),
-  };
+  const requestedSpec = specialization || 'ALL';
+  const existingIdx = facultyData.findIndex(
+    (f) => f.email.toLowerCase() === cleanEmail && f.role === 'TEACHER' && f.department.toUpperCase() === requestedDept.toUpperCase()
+  );
 
-  const existingIdx = facultyData.findIndex((f) => f.email.toLowerCase() === cleanEmail);
+  let finalTeacher: FacultyRecord;
   if (existingIdx !== -1) {
-    facultyData[existingIdx] = newTeacher;
+    const mergedSpec = mergeSpecializations(facultyData[existingIdx].specialization, requestedSpec);
+    facultyData[existingIdx] = {
+      ...facultyData[existingIdx],
+      name: String(teacherName).trim(),
+      specialization: mergedSpec,
+      semester: String(semester || facultyData[existingIdx].semester || 'VIII').trim().toUpperCase(),
+      batch: batch || facultyData[existingIdx].batch || 'Batch A',
+      section: String(section || facultyData[existingIdx].section || 'A').toUpperCase().trim(),
+    };
+    finalTeacher = facultyData[existingIdx];
   } else {
-    facultyData.push(newTeacher);
+    finalTeacher = {
+      email: cleanEmail,
+      name: String(teacherName).trim(),
+      role: 'TEACHER',
+      department: requestedDept,
+      specialization: requestedSpec,
+      semester: String(semester || 'VIII').trim().toUpperCase(),
+      batch: batch || 'Batch A',
+      section: String(section || 'A').toUpperCase().trim(),
+    };
+    facultyData.push(finalTeacher);
   }
   saveFacultyToDisk();
 
   // Sync to Google Apps Script Faculty sheet if configured
   await callGoogleAppsScript('addClassTeacher', {
     hodEmail,
-    teacherEmail: newTeacher.email,
-    teacherName: newTeacher.name,
-    department: newTeacher.department,
-    specialization: newTeacher.specialization,
-    semester: newTeacher.semester,
-    section: newTeacher.section,
-    batch: newTeacher.batch,
+    teacherEmail: finalTeacher.email,
+    teacherName: finalTeacher.name,
+    department: finalTeacher.department,
+    specialization: finalTeacher.specialization,
+    semester: finalTeacher.semester,
+    section: finalTeacher.section,
+    batch: finalTeacher.batch,
   });
 
   return res.json({
     success: true,
-    message: `Class Teacher ${newTeacher.name} (${newTeacher.department}) assigned for Sem ${newTeacher.semester} Sec ${newTeacher.section} (${newTeacher.batch}).`,
-    teacher: newTeacher,
+    message: `Class Teacher ${finalTeacher.name} (${finalTeacher.department}) assigned for Sem ${finalTeacher.semester} Sec ${finalTeacher.section} (${finalTeacher.batch}).`,
+    teacher: finalTeacher,
   });
 });
 

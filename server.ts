@@ -858,9 +858,9 @@ async function sendOfficialOtpEmail(recipientEmail: string, otpCode: string, por
         host: smtpHost,
         port,
         secure: port === 465,
-        connectionTimeout: 2500,
-        greetingTimeout: 2500,
-        socketTimeout: 3500,
+        connectionTimeout: 1500,
+        greetingTimeout: 1500,
+        socketTimeout: 2000,
         auth: {
           user: smtpUser,
           pass: smtpPass,
